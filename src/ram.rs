@@ -61,4 +61,17 @@ mod tests {
         assert_eq!(ram.read(0x0000_0000), 0xDEAD_BEEF);
         assert_eq!(ram.read(0x0000_0001), 0xC0DE_CAFE);
     }
+
+    #[test]
+    fn test_read_wrap_around() {
+        let mut ram = RamDevice::new();
+        ram.ram[0] = 0xDEAD_BEEF;
+        ram.ram[1] = 0xC0DE_CAFE;
+        assert_eq!(ram.read(0x0010_0000), 0xDEAD_BEEF);
+        assert_eq!(ram.read(0x0010_0001), 0xC0DE_CAFE);
+        assert_eq!(ram.read(0x0010_0002), 0xFFFF_FFFF);
+        assert_eq!(ram.read(0x0040_0000), 0xDEAD_BEEF);
+        assert_eq!(ram.read(0x0040_0001), 0xC0DE_CAFE);
+        assert_eq!(ram.read(0x0040_0002), 0xFFFF_FFFF);
+    }
 }
