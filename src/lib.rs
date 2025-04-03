@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod pipeline;
 mod ram;
 mod rom;
 mod system_interface;
