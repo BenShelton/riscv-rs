@@ -1,5 +1,8 @@
-use crate::ram::RamDevice;
-use crate::rom::RomDevice;
+mod ram;
+mod rom;
+
+pub use ram::RamDevice;
+pub use rom::RomDevice;
 
 pub trait MMIODevice {
     fn read(&self, address: u32) -> u32;

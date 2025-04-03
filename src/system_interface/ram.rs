@@ -1,3 +1,5 @@
+use super::MMIODevice;
+
 const RAM_SIZE: u32 = 1024 * 1024 * 4;
 const RAM_SIZE_BYTES: usize = (RAM_SIZE / 4) as usize;
 const RAM_MASK: u32 = (RAM_SIZE / 4) - 1;
@@ -8,15 +10,12 @@ pub struct RamDevice {
 
 impl RamDevice {
     pub fn new() -> Self {
-        let mut ram = Vec::with_capacity(RAM_SIZE_BYTES);
-        for _ in 0..RAM_SIZE_BYTES {
-            ram.push(0xFFFF_FFFF);
-        }
+        let ram = vec![0xFFFF_FFFF; RAM_SIZE_BYTES];
         RamDevice { ram }
     }
 }
 
-impl crate::system_interface::MMIODevice for RamDevice {
+impl MMIODevice for RamDevice {
     fn read(&self, address: u32) -> u32 {
         let index = (address & RAM_MASK) as usize;
         self.ram[index]
@@ -31,7 +30,6 @@ impl crate::system_interface::MMIODevice for RamDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system_interface::MMIODevice;
 
     #[test]
     fn test_read() {

@@ -1,13 +1,9 @@
 #![allow(dead_code)]
 
 mod pipeline;
-mod ram;
-mod rom;
 mod system_interface;
 
-use ram::RamDevice;
-use rom::RomDevice;
-use system_interface::SystemInterface;
+use system_interface::{RamDevice, RomDevice, SystemInterface};
 
 struct RVI32System {
     bus: SystemInterface,

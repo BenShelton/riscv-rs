@@ -1,3 +1,5 @@
+use super::MMIODevice;
+
 const ROM_SIZE: u32 = 1024 * 1024;
 const ROM_SIZE_BYTES: usize = (ROM_SIZE / 4) as usize;
 const ROM_MASK: u32 = (ROM_SIZE / 4) - 1;
@@ -8,10 +10,7 @@ pub struct RomDevice {
 
 impl RomDevice {
     pub fn new() -> Self {
-        let mut rom = Vec::with_capacity(ROM_SIZE_BYTES);
-        for _ in 0..ROM_SIZE_BYTES {
-            rom.push(0xFFFF_FFFF);
-        }
+        let rom = vec![0xFFFF_FFFF; ROM_SIZE_BYTES];
         RomDevice { rom }
     }
 
@@ -26,7 +25,7 @@ impl RomDevice {
     }
 }
 
-impl crate::system_interface::MMIODevice for RomDevice {
+impl MMIODevice for RomDevice {
     fn read(&self, address: u32) -> u32 {
         let index = (address & ROM_MASK) as usize;
         self.rom[index]
@@ -40,7 +39,6 @@ impl crate::system_interface::MMIODevice for RomDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system_interface::MMIODevice;
 
     #[test]
     fn test_load_read() {
