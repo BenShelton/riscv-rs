@@ -1,22 +1,23 @@
 use super::PipelineStage;
 use crate::system_interface::{MMIODevice, PROGRAM_ROM_START, SystemInterface};
+use std::{cell::RefCell, rc::Rc};
 
-pub struct InstructionFetch<'a> {
+pub struct InstructionFetch {
     pc: u32,
     pc_next: u32,
     instruction: u32,
     instruction_next: u32,
-    bus: &'a SystemInterface,
-    should_stall: fn() -> bool,
+    bus: Rc<RefCell<SystemInterface>>,
+    should_stall: Box<dyn Fn() -> bool>,
 }
 
-pub struct InstructionFetchParams<'a> {
-    bus: &'a SystemInterface,
-    should_stall: fn() -> bool,
+pub struct InstructionFetchParams {
+    pub bus: Rc<RefCell<SystemInterface>>,
+    pub should_stall: Box<dyn Fn() -> bool>,
 }
 
-impl<'a> InstructionFetch<'a> {
-    pub fn new(params: InstructionFetchParams<'a>) -> Self {
+impl InstructionFetch {
+    pub fn new(params: InstructionFetchParams) -> Self {
         Self {
             pc: PROGRAM_ROM_START,
             pc_next: PROGRAM_ROM_START,
@@ -27,23 +28,15 @@ impl<'a> InstructionFetch<'a> {
         }
     }
 
-    fn get_instruction_out(&self) -> u32 {
+    pub fn get_instruction_out(&self) -> u32 {
         self.instruction
     }
 }
 
-impl<'a> PipelineStage for InstructionFetch<'a> {
-    fn ready_to_send(&self) -> bool {
-        true
-    }
-
-    fn ready_to_receive(&self) -> bool {
-        true
-    }
-
+impl PipelineStage for InstructionFetch {
     fn compute(&mut self) {
         if !(self.should_stall)() {
-            self.instruction_next = self.bus.read(self.pc);
+            self.instruction_next = self.bus.borrow().read(self.pc);
             self.pc_next = self.pc_next.wrapping_add(4);
         }
     }

@@ -11,7 +11,7 @@ pub struct RamDevice {
 impl RamDevice {
     pub fn new() -> Self {
         let ram = vec![0xFFFF_FFFF; RAM_SIZE_BYTES];
-        RamDevice { ram }
+        Self { ram }
     }
 }
 

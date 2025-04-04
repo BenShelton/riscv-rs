@@ -11,7 +11,7 @@ pub struct RomDevice {
 impl RomDevice {
     pub fn new() -> Self {
         let rom = vec![0xFFFF_FFFF; ROM_SIZE_BYTES];
-        RomDevice { rom }
+        Self { rom }
     }
 
     pub fn load(&mut self, data: Vec<u32>) {
