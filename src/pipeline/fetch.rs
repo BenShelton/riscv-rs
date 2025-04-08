@@ -1,12 +1,10 @@
-use super::PipelineStage;
+use super::{LatchValue, PipelineStage};
 use crate::system_interface::{MMIODevice, PROGRAM_ROM_START, SystemInterface};
 use std::{cell::RefCell, rc::Rc};
 
 pub struct InstructionFetch {
-    pc: u32,
-    pc_next: u32,
-    instruction: u32,
-    instruction_next: u32,
+    pc: LatchValue<u32>,
+    instruction: LatchValue<u32>,
     bus: Rc<RefCell<SystemInterface>>,
     should_stall: Box<dyn Fn() -> bool>,
 }
@@ -19,17 +17,15 @@ pub struct InstructionFetchParams {
 impl InstructionFetch {
     pub fn new(params: InstructionFetchParams) -> Self {
         Self {
-            pc: PROGRAM_ROM_START,
-            pc_next: PROGRAM_ROM_START,
-            instruction: 0x0000_0000,
-            instruction_next: 0x0000_0000,
+            pc: LatchValue::new(PROGRAM_ROM_START),
+            instruction: LatchValue::new(0x0000_0000),
             bus: params.bus,
             should_stall: params.should_stall,
         }
     }
 
     pub fn get_instruction_out(&self) -> u32 {
-        self.instruction
+        *self.instruction.get()
     }
 }
 
@@ -38,12 +34,12 @@ impl PipelineStage for InstructionFetch {
         if (self.should_stall)() {
             return;
         }
-        self.instruction_next = self.bus.borrow().read(self.pc);
-        self.pc_next = self.pc_next.wrapping_add(4);
+        self.instruction.set(self.bus.borrow().read(*self.pc.get()));
+        self.pc.set(self.pc.get().wrapping_add(4));
     }
 
     fn latch_next(&mut self) {
-        self.instruction = self.instruction_next;
-        self.pc = self.pc_next;
+        self.instruction.latch_next();
+        self.pc.latch_next();
     }
 }

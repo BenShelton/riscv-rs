@@ -1,4 +1,4 @@
-use super::{PipelineStage, decode::DecodedInstruction};
+use super::{LatchValue, PipelineStage, decode::DecodedInstruction};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExecutionValue {
@@ -17,12 +17,9 @@ const ALU_OPERATION_OR: u8 = 0b110;
 const ALU_OPERATION_AND: u8 = 0b111;
 
 pub struct InstructionExecute {
-    alu_result: u32,
-    alu_result_next: u32,
-    rd: u8,
-    rd_next: u8,
-    is_alu_operation: bool,
-    is_alu_operation_next: bool,
+    alu_result: LatchValue<u32>,
+    rd: LatchValue<u8>,
+    is_alu_operation: LatchValue<bool>,
     should_stall: Box<dyn Fn() -> bool>,
     get_decoded_instruction_in: Box<dyn Fn() -> DecodedInstruction>,
 }
@@ -35,12 +32,9 @@ pub struct InstructionExecuteParams {
 impl InstructionExecute {
     pub fn new(params: InstructionExecuteParams) -> Self {
         Self {
-            alu_result: 0,
-            alu_result_next: 0,
-            rd: 0,
-            rd_next: 0,
-            is_alu_operation: false,
-            is_alu_operation_next: false,
+            alu_result: LatchValue::new(0),
+            rd: LatchValue::new(0),
+            is_alu_operation: LatchValue::new(false),
             should_stall: params.should_stall,
             get_decoded_instruction_in: params.get_decoded_instruction_in,
         }
@@ -48,9 +42,9 @@ impl InstructionExecute {
 
     pub fn get_execution_value_out(&self) -> ExecutionValue {
         ExecutionValue {
-            alu_result: self.alu_result,
-            rd: self.rd,
-            is_alu_operation: self.is_alu_operation,
+            alu_result: *self.alu_result.get(),
+            rd: *self.rd.get(),
+            is_alu_operation: *self.is_alu_operation.get(),
         }
     }
 }
@@ -61,15 +55,16 @@ impl PipelineStage for InstructionExecute {
             return;
         }
         let decoded = (self.get_decoded_instruction_in)();
-        self.rd_next = decoded.rd;
+        self.rd.set(decoded.rd);
 
         let is_register_op = ((decoded.opcode >> 5) & 1) == 1;
         let is_alternate = ((decoded.imm11_0 >> 10) & 1) == 1;
         let imm_32 = decoded.imm11_0 as u32;
 
-        self.is_alu_operation_next = (decoded.opcode & 0b101_1111) == 0b001_0011;
+        self.is_alu_operation
+            .set((decoded.opcode & 0b101_1111) == 0b001_0011);
 
-        self.alu_result_next = match decoded.funct3 {
+        self.alu_result.set(match decoded.funct3 {
             ALU_OPERATION_ADD => {
                 if is_register_op {
                     if is_alternate {
@@ -135,12 +130,12 @@ impl PipelineStage for InstructionExecute {
                 }
             }
             _ => 0,
-        };
+        });
     }
 
     fn latch_next(&mut self) {
-        self.alu_result = self.alu_result_next;
-        self.rd = self.rd_next;
-        self.is_alu_operation = self.is_alu_operation_next;
+        self.alu_result.latch_next();
+        self.rd.latch_next();
+        self.is_alu_operation.latch_next();
     }
 }

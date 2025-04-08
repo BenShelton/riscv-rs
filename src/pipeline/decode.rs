@@ -1,4 +1,4 @@
-use super::PipelineStage;
+use super::{LatchValue, PipelineStage};
 use crate::RegisterFile;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -15,24 +15,15 @@ pub struct DecodedInstruction {
 }
 
 pub struct InstructionDecode {
-    instruction: u32,
-    instruction_next: u32,
-    opcode: u8,
-    opcode_next: u8,
-    rd: u8,
-    rd_next: u8,
-    funct3: u8,
-    funct3_next: u8,
-    rs1: u32,
-    rs1_next: u32,
-    rs2: u32,
-    rs2_next: u32,
-    imm11_0: u16,
-    imm11_0_next: u16,
-    funct7: u8,
-    funct7_next: u8,
-    shamt: u8,
-    shamt_next: u8,
+    instruction: LatchValue<u32>,
+    opcode: LatchValue<u8>,
+    rd: LatchValue<u8>,
+    funct3: LatchValue<u8>,
+    rs1: LatchValue<u32>,
+    rs2: LatchValue<u32>,
+    imm11_0: LatchValue<u16>,
+    funct7: LatchValue<u8>,
+    shamt: LatchValue<u8>,
     should_stall: Box<dyn Fn() -> bool>,
     get_instruction_in: Box<dyn Fn() -> u32>,
     reg_file: RegisterFile,
@@ -47,24 +38,15 @@ pub struct InstructionDecodeParams {
 impl InstructionDecode {
     pub fn new(params: InstructionDecodeParams) -> Self {
         Self {
-            instruction: 0,
-            instruction_next: 0,
-            opcode: 0,
-            opcode_next: 0,
-            rd: 0,
-            rd_next: 0,
-            funct3: 0,
-            funct3_next: 0,
-            rs1: 0,
-            rs1_next: 0,
-            rs2: 0,
-            rs2_next: 0,
-            imm11_0: 0,
-            imm11_0_next: 0,
-            funct7: 0,
-            funct7_next: 0,
-            shamt: 0,
-            shamt_next: 0,
+            instruction: LatchValue::new(0),
+            opcode: LatchValue::new(0),
+            rd: LatchValue::new(0),
+            funct3: LatchValue::new(0),
+            rs1: LatchValue::new(0),
+            rs2: LatchValue::new(0),
+            imm11_0: LatchValue::new(0),
+            funct7: LatchValue::new(0),
+            shamt: LatchValue::new(0),
             should_stall: params.should_stall,
             get_instruction_in: params.get_instruction_in,
             reg_file: params.reg_file,
@@ -73,15 +55,15 @@ impl InstructionDecode {
 
     pub fn get_decoded_instruction_out(&self) -> DecodedInstruction {
         DecodedInstruction {
-            instruction: self.instruction,
-            opcode: self.opcode,
-            rd: self.rd,
-            funct3: self.funct3,
-            rs1: self.rs1,
-            rs2: self.rs2,
-            imm11_0: self.imm11_0,
-            funct7: self.funct7,
-            shamt: self.shamt,
+            instruction: *self.instruction.get(),
+            opcode: *self.opcode.get(),
+            rd: *self.rd.get(),
+            funct3: *self.funct3.get(),
+            rs1: *self.rs1.get(),
+            rs2: *self.rs2.get(),
+            imm11_0: *self.imm11_0.get(),
+            funct7: *self.funct7.get(),
+            shamt: *self.shamt.get(),
         }
     }
 }
@@ -91,34 +73,35 @@ impl PipelineStage for InstructionDecode {
         if (self.should_stall)() {
             return;
         }
-        self.instruction_next = (self.get_instruction_in)();
-        self.opcode_next = (self.instruction_next & 0x7F) as u8;
-        self.rd_next = ((self.instruction_next >> 7) & 0x1F) as u8;
-        self.funct3_next = ((self.instruction_next >> 12) & 0x07) as u8;
-        self.imm11_0_next = ((self.instruction_next >> 20) & 0xFFF) as u16;
-        self.funct7_next = ((self.instruction_next >> 25) & 0x7F) as u8;
-        let rs1_address = ((self.instruction_next >> 15) & 0x1F) as u8;
-        let rs2_address = ((self.instruction_next >> 20) & 0x1F) as u8;
-        self.shamt_next = rs2_address;
-        self.rs1_next = match rs1_address == 0 {
+        let instruction = (self.get_instruction_in)();
+        self.instruction.set(instruction);
+        self.opcode.set((instruction & 0x7F) as u8);
+        self.rd.set(((instruction >> 7) & 0x1F) as u8);
+        self.funct3.set(((instruction >> 12) & 0x07) as u8);
+        self.imm11_0.set(((instruction >> 20) & 0xFFF) as u16);
+        self.funct7.set(((instruction >> 25) & 0x7F) as u8);
+        let rs1_address = ((instruction >> 15) & 0x1F) as u8;
+        let rs2_address = ((instruction >> 20) & 0x1F) as u8;
+        self.shamt.set(rs2_address);
+        self.rs1.set(match rs1_address == 0 {
             true => 0,
             false => self.reg_file.borrow()[rs1_address as usize],
-        };
-        self.rs2_next = match rs2_address == 0 {
+        });
+        self.rs2.set(match rs2_address == 0 {
             true => 0,
             false => self.reg_file.borrow()[rs2_address as usize],
-        };
+        });
     }
 
     fn latch_next(&mut self) {
-        self.instruction = self.instruction_next;
-        self.opcode = self.opcode_next;
-        self.rd = self.rd_next;
-        self.funct3 = self.funct3_next;
-        self.rs1 = self.rs1_next;
-        self.rs2 = self.rs2_next;
-        self.imm11_0 = self.imm11_0_next;
-        self.funct7 = self.funct7_next;
-        self.shamt = self.shamt_next;
+        self.instruction.latch_next();
+        self.opcode.latch_next();
+        self.rd.latch_next();
+        self.funct3.latch_next();
+        self.rs1.latch_next();
+        self.rs2.latch_next();
+        self.imm11_0.latch_next();
+        self.funct7.latch_next();
+        self.shamt.latch_next();
     }
 }
