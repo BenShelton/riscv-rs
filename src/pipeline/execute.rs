@@ -56,31 +56,32 @@ impl InstructionExecute {
 
 impl PipelineStage for InstructionExecute {
     fn compute(&mut self) {
-        if !(self.should_stall)() {
-            let decoded = (self.get_decoded_instruction_in)();
-            self.rd_next = decoded.rd;
-
-            let is_register_op = ((decoded.opcode >> 5) & 1) == 1;
-            let is_alternate = ((decoded.imm11_0 >> 10) & 1) == 1;
-            let imm_32 = decoded.imm11_0 as i32;
-
-            self.is_alu_operation_next = (decoded.opcode & 0b101_1111) == 0b001_0011;
-
-            self.alu_result_next = match decoded.funct3 {
-                ALU_OPERATION_ADD => {
-                    if is_register_op {
-                        if is_alternate {
-                            decoded.rs1 - decoded.rs2
-                        } else {
-                            decoded.rs1 + decoded.rs2
-                        }
-                    } else {
-                        decoded.rs1 + imm_32
-                    }
-                }
-                _ => 0,
-            };
+        if (self.should_stall)() {
+            return;
         }
+        let decoded = (self.get_decoded_instruction_in)();
+        self.rd_next = decoded.rd;
+
+        let is_register_op = ((decoded.opcode >> 5) & 1) == 1;
+        let is_alternate = ((decoded.imm11_0 >> 10) & 1) == 1;
+        let imm_32 = decoded.imm11_0 as i32;
+
+        self.is_alu_operation_next = (decoded.opcode & 0b101_1111) == 0b001_0011;
+
+        self.alu_result_next = match decoded.funct3 {
+            ALU_OPERATION_ADD => {
+                if is_register_op {
+                    if is_alternate {
+                        decoded.rs1 - decoded.rs2
+                    } else {
+                        decoded.rs1 + decoded.rs2
+                    }
+                } else {
+                    decoded.rs1 + imm_32
+                }
+            }
+            _ => 0,
+        };
     }
 
     fn latch_next(&mut self) {

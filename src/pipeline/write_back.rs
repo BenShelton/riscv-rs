@@ -26,12 +26,13 @@ impl InstructionWriteBack {
 
 impl PipelineStage for InstructionWriteBack {
     fn compute(&mut self) {
-        if !(self.should_stall)() {
-            let memory_access_value = (self.get_memory_access_value_in)();
-            if memory_access_value.is_alu_operation {
-                self.reg_file.borrow_mut()[memory_access_value.rd as usize] =
-                    memory_access_value.alu_result;
-            }
+        if (self.should_stall)() {
+            return;
+        }
+        let memory_access_value = (self.get_memory_access_value_in)();
+        if memory_access_value.is_alu_operation {
+            self.reg_file.borrow_mut()[memory_access_value.rd as usize] =
+                memory_access_value.alu_result;
         }
     }
 

@@ -87,25 +87,26 @@ impl InstructionDecode {
 
 impl PipelineStage for InstructionDecode {
     fn compute(&mut self) {
-        if !(self.should_stall)() {
-            self.instruction_next = (self.get_instruction_in)();
-            self.opcode_next = (self.instruction_next & 0x7F) as u8;
-            self.rd_next = ((self.instruction_next >> 7) & 0x1F) as u8;
-            self.funct3_next = ((self.instruction_next >> 12) & 0x07) as u8;
-            self.imm11_0_next = ((self.instruction_next >> 20) & 0x7FF) as u16;
-            self.funct7_next = ((self.instruction_next >> 25) & 0x7F) as u8;
-            let rs1_address = ((self.instruction_next >> 15) & 0x1F) as u8;
-            let rs2_address = ((self.instruction_next >> 20) & 0x1F) as u8;
-            self.shamt_next = rs2_address;
-            self.rs1_next = match rs1_address == 0 {
-                true => 0,
-                false => self.reg_file.borrow()[rs1_address as usize],
-            };
-            self.rs2_next = match rs2_address == 0 {
-                true => 0,
-                false => self.reg_file.borrow()[rs2_address as usize],
-            };
+        if (self.should_stall)() {
+            return;
         }
+        self.instruction_next = (self.get_instruction_in)();
+        self.opcode_next = (self.instruction_next & 0x7F) as u8;
+        self.rd_next = ((self.instruction_next >> 7) & 0x1F) as u8;
+        self.funct3_next = ((self.instruction_next >> 12) & 0x07) as u8;
+        self.imm11_0_next = ((self.instruction_next >> 20) & 0x7FF) as u16;
+        self.funct7_next = ((self.instruction_next >> 25) & 0x7F) as u8;
+        let rs1_address = ((self.instruction_next >> 15) & 0x1F) as u8;
+        let rs2_address = ((self.instruction_next >> 20) & 0x1F) as u8;
+        self.shamt_next = rs2_address;
+        self.rs1_next = match rs1_address == 0 {
+            true => 0,
+            false => self.reg_file.borrow()[rs1_address as usize],
+        };
+        self.rs2_next = match rs2_address == 0 {
+            true => 0,
+            false => self.reg_file.borrow()[rs2_address as usize],
+        };
     }
 
     fn latch_next(&mut self) {

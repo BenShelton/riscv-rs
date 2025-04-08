@@ -47,12 +47,13 @@ impl InstructionMemoryAccess {
 
 impl PipelineStage for InstructionMemoryAccess {
     fn compute(&mut self) {
-        if !(self.should_stall)() {
-            let execution_value = (self.get_execution_value_in)();
-            self.alu_result_next = execution_value.alu_result;
-            self.rd_next = execution_value.rd;
-            self.is_alu_operation_next = execution_value.is_alu_operation;
+        if (self.should_stall)() {
+            return;
         }
+        let execution_value = (self.get_execution_value_in)();
+        self.alu_result_next = execution_value.alu_result;
+        self.rd_next = execution_value.rd;
+        self.is_alu_operation_next = execution_value.is_alu_operation;
     }
 
     fn latch_next(&mut self) {

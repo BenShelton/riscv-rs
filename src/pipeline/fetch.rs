@@ -35,10 +35,11 @@ impl InstructionFetch {
 
 impl PipelineStage for InstructionFetch {
     fn compute(&mut self) {
-        if !(self.should_stall)() {
-            self.instruction_next = self.bus.borrow().read(self.pc);
-            self.pc_next = self.pc_next.wrapping_add(4);
+        if (self.should_stall)() {
+            return;
         }
+        self.instruction_next = self.bus.borrow().read(self.pc);
+        self.pc_next = self.pc_next.wrapping_add(4);
     }
 
     fn latch_next(&mut self) {
