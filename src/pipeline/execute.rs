@@ -10,8 +10,9 @@ pub struct ExecutionValue {
 const ALU_OPERATION_ADD: u8 = 0b000;
 const ALU_OPERATION_SLL: u8 = 0b001;
 const ALU_OPERATION_SLT: u8 = 0b010;
+const ALU_OPERATION_SLTU: u8 = 0b011;
 const ALU_OPERATION_XOR: u8 = 0b100;
-const ALU_OPERATION_SRL: u8 = 0b101;
+const ALU_OPERATION_SR: u8 = 0b101;
 const ALU_OPERATION_OR: u8 = 0b110;
 const ALU_OPERATION_AND: u8 = 0b111;
 
@@ -78,6 +79,59 @@ impl PipelineStage for InstructionExecute {
                     }
                 } else {
                     decoded.rs1 + imm_32
+                }
+            }
+            ALU_OPERATION_SLL => {
+                if is_register_op {
+                    decoded.rs1 << decoded.rs2
+                } else {
+                    decoded.rs1 << decoded.shamt
+                }
+            }
+            ALU_OPERATION_SLT => {
+                if is_register_op {
+                    ((decoded.rs1 as i32) < (decoded.rs2 as i32)).into()
+                } else {
+                    ((decoded.rs1 as i32) < (imm_32 as i32)).into()
+                }
+            }
+            ALU_OPERATION_SLTU => {
+                if is_register_op {
+                    (decoded.rs1 < decoded.rs2).into()
+                } else {
+                    (decoded.rs1 < imm_32).into()
+                }
+            }
+            ALU_OPERATION_XOR => {
+                if is_register_op {
+                    decoded.rs1 ^ decoded.rs2
+                } else {
+                    decoded.rs1 ^ imm_32
+                }
+            }
+            ALU_OPERATION_SR => {
+                if is_register_op {
+                    if is_alternate {
+                        ((decoded.rs1 as i32) >> (decoded.rs2 as i32)) as u32
+                    } else {
+                        decoded.rs1 >> decoded.rs2
+                    }
+                } else {
+                    decoded.rs1 >> decoded.shamt
+                }
+            }
+            ALU_OPERATION_OR => {
+                if is_register_op {
+                    decoded.rs1 | decoded.rs2
+                } else {
+                    decoded.rs1 | imm_32
+                }
+            }
+            ALU_OPERATION_AND => {
+                if is_register_op {
+                    decoded.rs1 & decoded.rs2
+                } else {
+                    decoded.rs1 & imm_32
                 }
             }
             _ => 0,
