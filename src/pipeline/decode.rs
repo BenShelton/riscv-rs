@@ -1,13 +1,14 @@
 use super::PipelineStage;
 use crate::RegisterFile;
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct DecodedInstruction {
     pub instruction: u32,
     pub opcode: u8,
     pub rd: u8,
     pub funct3: u8,
-    pub rs1: i32,
-    pub rs2: i32,
+    pub rs1: u32,
+    pub rs2: u32,
     pub imm11_0: u16,
     pub funct7: u8,
     pub shamt: u8,
@@ -22,10 +23,10 @@ pub struct InstructionDecode {
     rd_next: u8,
     funct3: u8,
     funct3_next: u8,
-    rs1: i32,
-    rs1_next: i32,
-    rs2: i32,
-    rs2_next: i32,
+    rs1: u32,
+    rs1_next: u32,
+    rs2: u32,
+    rs2_next: u32,
     imm11_0: u16,
     imm11_0_next: u16,
     funct7: u8,
@@ -94,7 +95,7 @@ impl PipelineStage for InstructionDecode {
         self.opcode_next = (self.instruction_next & 0x7F) as u8;
         self.rd_next = ((self.instruction_next >> 7) & 0x1F) as u8;
         self.funct3_next = ((self.instruction_next >> 12) & 0x07) as u8;
-        self.imm11_0_next = ((self.instruction_next >> 20) & 0x7FF) as u16;
+        self.imm11_0_next = ((self.instruction_next >> 20) & 0xFFF) as u16;
         self.funct7_next = ((self.instruction_next >> 25) & 0x7F) as u8;
         let rs1_address = ((self.instruction_next >> 15) & 0x1F) as u8;
         let rs2_address = ((self.instruction_next >> 20) & 0x1F) as u8;

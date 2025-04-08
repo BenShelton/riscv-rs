@@ -2,7 +2,7 @@ use super::{PipelineStage, decode::DecodedInstruction};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExecutionValue {
-    pub alu_result: i32,
+    pub alu_result: u32,
     pub rd: u8,
     pub is_alu_operation: bool,
 }
@@ -16,8 +16,8 @@ const ALU_OPERATION_OR: u8 = 0b110;
 const ALU_OPERATION_AND: u8 = 0b111;
 
 pub struct InstructionExecute {
-    alu_result: i32,
-    alu_result_next: i32,
+    alu_result: u32,
+    alu_result_next: u32,
     rd: u8,
     rd_next: u8,
     is_alu_operation: bool,
@@ -64,7 +64,7 @@ impl PipelineStage for InstructionExecute {
 
         let is_register_op = ((decoded.opcode >> 5) & 1) == 1;
         let is_alternate = ((decoded.imm11_0 >> 10) & 1) == 1;
-        let imm_32 = decoded.imm11_0 as i32;
+        let imm_32 = decoded.imm11_0 as u32;
 
         self.is_alu_operation_next = (decoded.opcode & 0b101_1111) == 0b001_0011;
 

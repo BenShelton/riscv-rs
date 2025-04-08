@@ -1,7 +1,8 @@
 use super::{PipelineStage, execute::ExecutionValue};
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct MemoryAccessValue {
-    pub alu_result: i32,
+    pub alu_result: u32,
     pub rd: u8,
     pub is_alu_operation: bool,
 }
@@ -9,8 +10,8 @@ pub struct MemoryAccessValue {
 pub struct InstructionMemoryAccess {
     should_stall: Box<dyn Fn() -> bool>,
     get_execution_value_in: Box<dyn Fn() -> ExecutionValue>,
-    alu_result: i32,
-    alu_result_next: i32,
+    alu_result: u32,
+    alu_result_next: u32,
     rd: u8,
     rd_next: u8,
     is_alu_operation: bool,

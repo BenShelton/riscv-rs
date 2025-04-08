@@ -24,7 +24,7 @@ enum State {
     WriteBack,
 }
 
-pub type RegisterFile = Rc<RefCell<[i32; 32]>>;
+pub type RegisterFile = Rc<RefCell<[u32; 32]>>;
 
 struct RVI32System {
     bus: Rc<RefCell<SystemInterface>>,
@@ -42,7 +42,7 @@ impl RVI32System {
         let rom = RomDevice::new();
         let ram = RamDevice::new();
         let bus = Rc::new(RefCell::new(SystemInterface::new(rom, ram)));
-        let reg_file = Rc::new(RefCell::new([0i32; 32]));
+        let reg_file = Rc::new(RefCell::new([0u32; 32]));
 
         let state = Rc::new(RefCell::new(State::Fetch));
 
@@ -86,7 +86,7 @@ impl RVI32System {
             let stage_ex = Rc::clone(&stage_ex);
             Rc::new(RefCell::new(InstructionMemoryAccess::new(
                 InstructionMemoryAccessParams {
-                    should_stall: Box::new(move || *state.borrow() != State::Execute),
+                    should_stall: Box::new(move || *state.borrow() != State::MemoryAccess),
                     get_execution_value_in: Box::new(move || {
                         stage_ex.borrow().get_execution_value_out()
                     }),
@@ -99,7 +99,7 @@ impl RVI32System {
             let stage_ma = Rc::clone(&stage_ma);
             Rc::new(RefCell::new(InstructionWriteBack::new(
                 InstructionWriteBackParams {
-                    should_stall: Box::new(move || *state.borrow() != State::Execute),
+                    should_stall: Box::new(move || *state.borrow() != State::WriteBack),
                     get_memory_access_value_in: Box::new(move || {
                         stage_ma.borrow().get_memory_access_value_out()
                     }),
@@ -153,7 +153,12 @@ impl RVI32System {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{pipeline::execute::ExecutionValue, system_interface::MMIODevice};
+    use crate::{
+        pipeline::{
+            decode::DecodedInstruction, execute::ExecutionValue, memory_access::MemoryAccessValue,
+        },
+        system_interface::MMIODevice,
+    };
 
     #[test]
     fn test_rom_read() {
@@ -215,15 +220,35 @@ mod tests {
             0b000000000001_00001_000_00011_0010011,  // ADDI 1, r1, r3
             0b0000000_00001_00010_000_00100_0110011, // ADD r1, r2, r4
             0b0100000_00001_00010_000_00100_0110011, // SUB r1, r2, r4
+            0b111111111111_00001_000_00011_0010011,  // ADDI 1, r1, r3
         ]);
 
         // ADDI 1, r1, r3
         rv.cycle();
+        assert_eq!(
+            rv.stage_if.borrow().get_instruction_out(),
+            0b000000000001_00001_000_00011_0010011
+        );
         assert_eq!(*rv.state.borrow(), State::Decode);
+
         rv.cycle();
+        assert_eq!(
+            rv.stage_de.borrow().get_decoded_instruction_out(),
+            DecodedInstruction {
+                instruction: 0b000000000001_00001_000_00011_0010011,
+                opcode: 0b0010011,
+                rd: 0b00011,
+                funct3: 0b000,
+                imm11_0: 0b00000000001,
+                rs1: 0x0102_0304,
+                rs2: 0x0102_0304,
+                funct7: 0b0000000,
+                shamt: 0b00001
+            }
+        );
         assert_eq!(*rv.state.borrow(), State::Execute);
+
         rv.cycle();
-        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
         assert_eq!(
             rv.stage_ex.borrow().get_execution_value_out(),
             ExecutionValue {
@@ -232,18 +257,49 @@ mod tests {
                 is_alu_operation: true,
             }
         );
+        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
+
         rv.cycle();
+        assert_eq!(
+            rv.stage_ma.borrow().get_memory_access_value_out(),
+            MemoryAccessValue {
+                alu_result: 0x0102_0305,
+                rd: 0b00011,
+                is_alu_operation: true,
+            }
+        );
         assert_eq!(*rv.state.borrow(), State::WriteBack);
+
         rv.cycle();
+        assert_eq!(rv.reg_file.borrow()[0b00011], 0x0102_0305);
         assert_eq!(*rv.state.borrow(), State::Fetch);
 
         // ADD r1, r2, r4
         rv.cycle();
+        assert_eq!(
+            rv.stage_if.borrow().get_instruction_out(),
+            0b0000000_00001_00010_000_00100_0110011
+        );
         assert_eq!(*rv.state.borrow(), State::Decode);
+
         rv.cycle();
+        assert_eq!(
+            rv.stage_de.borrow().get_decoded_instruction_out(),
+            DecodedInstruction {
+                instruction: 0b0000000_00001_00010_000_00100_0110011,
+                opcode: 0b0110011,
+                rd: 0b00100,
+                funct3: 0b000,
+                imm11_0: 0b00000000001,
+                rs1: 0x0203_0405,
+                rs2: 0x0102_0304,
+                funct7: 0b0000000,
+                shamt: 0b00001
+            }
+        );
         assert_eq!(*rv.state.borrow(), State::Execute);
+
         rv.cycle();
-        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
         assert_eq!(
             rv.stage_ex.borrow().get_execution_value_out(),
             ExecutionValue {
@@ -252,18 +308,49 @@ mod tests {
                 is_alu_operation: true,
             }
         );
+        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
+
         rv.cycle();
+        assert_eq!(
+            rv.stage_ma.borrow().get_memory_access_value_out(),
+            MemoryAccessValue {
+                alu_result: 0x0305_0709,
+                rd: 0b00100,
+                is_alu_operation: true,
+            }
+        );
         assert_eq!(*rv.state.borrow(), State::WriteBack);
+
         rv.cycle();
+        assert_eq!(rv.reg_file.borrow()[0b00100], 0x0305_0709);
         assert_eq!(*rv.state.borrow(), State::Fetch);
 
         // SUB r1, r2, r4
         rv.cycle();
+        assert_eq!(
+            rv.stage_if.borrow().get_instruction_out(),
+            0b0100000_00001_00010_000_00100_0110011
+        );
         assert_eq!(*rv.state.borrow(), State::Decode);
+
         rv.cycle();
+        assert_eq!(
+            rv.stage_de.borrow().get_decoded_instruction_out(),
+            DecodedInstruction {
+                instruction: 0b0100000_00001_00010_000_00100_0110011,
+                opcode: 0b0110011,
+                rd: 0b00100,
+                funct3: 0b000,
+                imm11_0: 0b10000000001,
+                rs1: 0x0203_0405,
+                rs2: 0x0102_0304,
+                funct7: 0b0100000,
+                shamt: 0b00001
+            }
+        );
         assert_eq!(*rv.state.borrow(), State::Execute);
+
         rv.cycle();
-        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
         assert_eq!(
             rv.stage_ex.borrow().get_execution_value_out(),
             ExecutionValue {
@@ -272,9 +359,72 @@ mod tests {
                 is_alu_operation: true,
             }
         );
+        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
+
         rv.cycle();
+        assert_eq!(
+            rv.stage_ma.borrow().get_memory_access_value_out(),
+            MemoryAccessValue {
+                alu_result: 0x0101_0101,
+                rd: 0b00100,
+                is_alu_operation: true,
+            }
+        );
         assert_eq!(*rv.state.borrow(), State::WriteBack);
+
         rv.cycle();
+        assert_eq!(rv.reg_file.borrow()[0b00100], 0x0101_0101);
+        assert_eq!(*rv.state.borrow(), State::Fetch);
+
+        // ADDI 1, r1, r3
+        rv.cycle();
+        assert_eq!(
+            rv.stage_if.borrow().get_instruction_out(),
+            0b111111111111_00001_000_00011_0010011
+        );
+        assert_eq!(*rv.state.borrow(), State::Decode);
+
+        rv.cycle();
+        assert_eq!(
+            rv.stage_de.borrow().get_decoded_instruction_out(),
+            DecodedInstruction {
+                instruction: 0b111111111111_00001_000_00011_0010011,
+                opcode: 0b0010011,
+                rd: 0b00011,
+                funct3: 0b000,
+                imm11_0: 0b111111111111,
+                rs1: 0x0102_0304,
+                rs2: 0x0000_0000,
+                funct7: 0b1111111,
+                shamt: 0b11111
+            }
+        );
+        assert_eq!(*rv.state.borrow(), State::Execute);
+
+        rv.cycle();
+        assert_eq!(
+            rv.stage_ex.borrow().get_execution_value_out(),
+            ExecutionValue {
+                alu_result: 0x0102_1303,
+                rd: 0b00011,
+                is_alu_operation: true,
+            }
+        );
+        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
+
+        rv.cycle();
+        assert_eq!(
+            rv.stage_ma.borrow().get_memory_access_value_out(),
+            MemoryAccessValue {
+                alu_result: 0x0102_1303,
+                rd: 0b00011,
+                is_alu_operation: true,
+            }
+        );
+        assert_eq!(*rv.state.borrow(), State::WriteBack);
+
+        rv.cycle();
+        assert_eq!(rv.reg_file.borrow()[0b00011], 0x0102_1303);
         assert_eq!(*rv.state.borrow(), State::Fetch);
     }
 }
