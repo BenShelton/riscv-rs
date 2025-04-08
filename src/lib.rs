@@ -9,6 +9,8 @@ use pipeline::{
     decode::{InstructionDecode, InstructionDecodeParams},
     execute::{InstructionExecute, InstructionExecuteParams},
     fetch::{InstructionFetch, InstructionFetchParams},
+    memory_access::{InstructionMemoryAccess, InstructionMemoryAccessParams},
+    write_back::{InstructionWriteBack, InstructionWriteBackParams},
 };
 use std::{cell::RefCell, rc::Rc};
 use system_interface::{RamDevice, RomDevice, SystemInterface};
@@ -19,7 +21,7 @@ enum State {
     Decode,
     Execute,
     MemoryAccess,
-    Writeback,
+    WriteBack,
 }
 
 pub type RegisterFile = Rc<RefCell<[i32; 32]>>;
@@ -31,6 +33,8 @@ struct RVI32System {
     stage_if: Rc<RefCell<InstructionFetch>>,
     stage_de: Rc<RefCell<InstructionDecode>>,
     stage_ex: Rc<RefCell<InstructionExecute>>,
+    stage_ma: Rc<RefCell<InstructionMemoryAccess>>,
+    stage_wb: Rc<RefCell<InstructionWriteBack>>,
 }
 
 impl RVI32System {
@@ -77,6 +81,33 @@ impl RVI32System {
             )))
         };
 
+        let stage_ma = {
+            let state = Rc::clone(&state);
+            let stage_ex = Rc::clone(&stage_ex);
+            Rc::new(RefCell::new(InstructionMemoryAccess::new(
+                InstructionMemoryAccessParams {
+                    should_stall: Box::new(move || *state.borrow() != State::Execute),
+                    get_execution_value_in: Box::new(move || {
+                        stage_ex.borrow().get_execution_value_out()
+                    }),
+                },
+            )))
+        };
+
+        let stage_wb = {
+            let state = Rc::clone(&state);
+            let stage_ma = Rc::clone(&stage_ma);
+            Rc::new(RefCell::new(InstructionWriteBack::new(
+                InstructionWriteBackParams {
+                    should_stall: Box::new(move || *state.borrow() != State::Execute),
+                    get_memory_access_value_in: Box::new(move || {
+                        stage_ma.borrow().get_memory_access_value_out()
+                    }),
+                    reg_file: Rc::clone(&reg_file),
+                },
+            )))
+        };
+
         Self {
             bus: Rc::clone(&bus),
             state: Rc::clone(&state),
@@ -84,6 +115,8 @@ impl RVI32System {
             stage_if: Rc::clone(&stage_if),
             stage_de: Rc::clone(&stage_de),
             stage_ex: Rc::clone(&stage_ex),
+            stage_ma: Rc::clone(&stage_ma),
+            stage_wb: Rc::clone(&stage_wb),
         }
     }
 
@@ -91,12 +124,16 @@ impl RVI32System {
         self.stage_if.borrow_mut().compute();
         self.stage_de.borrow_mut().compute();
         self.stage_ex.borrow_mut().compute();
+        self.stage_ma.borrow_mut().compute();
+        self.stage_wb.borrow_mut().compute();
     }
 
     pub fn latch_next(&mut self) {
         self.stage_if.borrow_mut().latch_next();
         self.stage_de.borrow_mut().latch_next();
         self.stage_ex.borrow_mut().latch_next();
+        self.stage_ma.borrow_mut().latch_next();
+        self.stage_wb.borrow_mut().latch_next();
     }
 
     pub fn cycle(&mut self) {
@@ -106,7 +143,9 @@ impl RVI32System {
         self.state.replace_with(|state| match state {
             State::Fetch => State::Decode,
             State::Decode => State::Execute,
-            _ => State::Fetch,
+            State::Execute => State::MemoryAccess,
+            State::MemoryAccess => State::WriteBack,
+            State::WriteBack => State::Fetch,
         });
     }
 }
@@ -114,7 +153,7 @@ impl RVI32System {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system_interface::MMIODevice;
+    use crate::{pipeline::execute::ExecutionValue, system_interface::MMIODevice};
 
     #[test]
     fn test_rom_read() {
@@ -178,28 +217,64 @@ mod tests {
             0b0100000_00001_00010_000_00100_0110011, // SUB r1, r2, r4
         ]);
 
+        // ADDI 1, r1, r3
         rv.cycle();
         assert_eq!(*rv.state.borrow(), State::Decode);
         rv.cycle();
         assert_eq!(*rv.state.borrow(), State::Execute);
         rv.cycle();
+        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
+        assert_eq!(
+            rv.stage_ex.borrow().get_execution_value_out(),
+            ExecutionValue {
+                alu_result: 0x0102_0305,
+                rd: 0b00011,
+                is_alu_operation: true,
+            }
+        );
+        rv.cycle();
+        assert_eq!(*rv.state.borrow(), State::WriteBack);
+        rv.cycle();
         assert_eq!(*rv.state.borrow(), State::Fetch);
-        assert_eq!(rv.stage_ex.borrow().get_alu_result_out(), 0x0102_0305);
 
+        // ADD r1, r2, r4
         rv.cycle();
         assert_eq!(*rv.state.borrow(), State::Decode);
         rv.cycle();
         assert_eq!(*rv.state.borrow(), State::Execute);
         rv.cycle();
+        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
+        assert_eq!(
+            rv.stage_ex.borrow().get_execution_value_out(),
+            ExecutionValue {
+                alu_result: 0x0305_0709,
+                rd: 0b00100,
+                is_alu_operation: true,
+            }
+        );
+        rv.cycle();
+        assert_eq!(*rv.state.borrow(), State::WriteBack);
+        rv.cycle();
         assert_eq!(*rv.state.borrow(), State::Fetch);
-        assert_eq!(rv.stage_ex.borrow().get_alu_result_out(), 0x0305_0709);
 
+        // SUB r1, r2, r4
         rv.cycle();
         assert_eq!(*rv.state.borrow(), State::Decode);
         rv.cycle();
         assert_eq!(*rv.state.borrow(), State::Execute);
         rv.cycle();
+        assert_eq!(*rv.state.borrow(), State::MemoryAccess);
+        assert_eq!(
+            rv.stage_ex.borrow().get_execution_value_out(),
+            ExecutionValue {
+                alu_result: 0x0101_0101,
+                rd: 0b00100,
+                is_alu_operation: true,
+            }
+        );
+        rv.cycle();
+        assert_eq!(*rv.state.borrow(), State::WriteBack);
+        rv.cycle();
         assert_eq!(*rv.state.borrow(), State::Fetch);
-        assert_eq!(rv.stage_ex.borrow().get_alu_result_out(), 0x0101_0101);
     }
 }
