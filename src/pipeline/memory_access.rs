@@ -11,20 +11,16 @@ pub struct InstructionMemoryAccess {
     alu_result: LatchValue<u32>,
     rd: LatchValue<u8>,
     is_alu_operation: LatchValue<bool>,
-    should_stall: Box<dyn Fn() -> bool>,
-    get_execution_value_in: Box<dyn Fn() -> ExecutionValue>,
 }
 
 pub struct InstructionMemoryAccessParams {
-    pub should_stall: Box<dyn Fn() -> bool>,
-    pub get_execution_value_in: Box<dyn Fn() -> ExecutionValue>,
+    pub should_stall: bool,
+    pub execution_value_in: ExecutionValue,
 }
 
 impl InstructionMemoryAccess {
-    pub fn new(params: InstructionMemoryAccessParams) -> Self {
+    pub fn new() -> Self {
         Self {
-            should_stall: params.should_stall,
-            get_execution_value_in: params.get_execution_value_in,
             alu_result: LatchValue::new(0),
             rd: LatchValue::new(0),
             is_alu_operation: LatchValue::new(false),
@@ -40,12 +36,12 @@ impl InstructionMemoryAccess {
     }
 }
 
-impl PipelineStage for InstructionMemoryAccess {
-    fn compute(&mut self) {
-        if (self.should_stall)() {
+impl PipelineStage<InstructionMemoryAccessParams> for InstructionMemoryAccess {
+    fn compute(&mut self, params: InstructionMemoryAccessParams) {
+        if params.should_stall {
             return;
         }
-        let execution_value = (self.get_execution_value_in)();
+        let execution_value = params.execution_value_in;
         self.alu_result.set(execution_value.alu_result);
         self.rd.set(execution_value.rd);
         self.is_alu_operation.set(execution_value.is_alu_operation);

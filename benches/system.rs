@@ -7,13 +7,12 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("100 commands", |b| {
         b.iter(|| {
             let mut rv = RVI32System::new();
-            rv.reg_file.borrow_mut()[1] = 0x0102_0304;
-            rv.reg_file.borrow_mut()[2] = 0x0203_0405;
-            rv.reg_file.borrow_mut()[10] = 0x8000_0000;
-            rv.reg_file.borrow_mut()[11] = 0x0000_0001;
+            rv.reg_file[1] = 0x0102_0304;
+            rv.reg_file[2] = 0x0203_0405;
+            rv.reg_file[10] = 0x8000_0000;
+            rv.reg_file[11] = 0x0000_0001;
 
             rv.bus
-                .borrow_mut()
                 .rom
                 .load(vec![0b000000000001_00001_000_00011_0010011; 100]);
 

@@ -20,23 +20,19 @@ pub struct InstructionExecute {
     alu_result: LatchValue<u32>,
     rd: LatchValue<u8>,
     is_alu_operation: LatchValue<bool>,
-    should_stall: Box<dyn Fn() -> bool>,
-    get_decoded_instruction_in: Box<dyn Fn() -> DecodedInstruction>,
 }
 
 pub struct InstructionExecuteParams {
-    pub should_stall: Box<dyn Fn() -> bool>,
-    pub get_decoded_instruction_in: Box<dyn Fn() -> DecodedInstruction>,
+    pub should_stall: bool,
+    pub decoded_instruction_in: DecodedInstruction,
 }
 
 impl InstructionExecute {
-    pub fn new(params: InstructionExecuteParams) -> Self {
+    pub fn new() -> Self {
         Self {
             alu_result: LatchValue::new(0),
             rd: LatchValue::new(0),
             is_alu_operation: LatchValue::new(false),
-            should_stall: params.should_stall,
-            get_decoded_instruction_in: params.get_decoded_instruction_in,
         }
     }
 
@@ -49,12 +45,12 @@ impl InstructionExecute {
     }
 }
 
-impl PipelineStage for InstructionExecute {
-    fn compute(&mut self) {
-        if (self.should_stall)() {
+impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
+    fn compute(&mut self, params: InstructionExecuteParams) {
+        if params.should_stall {
             return;
         }
-        let decoded = (self.get_decoded_instruction_in)();
+        let decoded = params.decoded_instruction_in;
         self.rd.set(decoded.rd);
 
         let is_register_op = ((decoded.opcode >> 5) & 1) == 1;

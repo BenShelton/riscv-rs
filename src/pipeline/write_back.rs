@@ -2,37 +2,28 @@ use crate::RegisterFile;
 
 use super::{PipelineStage, memory_access::MemoryAccessValue};
 
-pub struct InstructionWriteBack {
-    should_stall: Box<dyn Fn() -> bool>,
-    get_memory_access_value_in: Box<dyn Fn() -> MemoryAccessValue>,
-    reg_file: RegisterFile,
-}
+pub struct InstructionWriteBack {}
 
-pub struct InstructionWriteBackParams {
-    pub should_stall: Box<dyn Fn() -> bool>,
-    pub get_memory_access_value_in: Box<dyn Fn() -> MemoryAccessValue>,
-    pub reg_file: RegisterFile,
+pub struct InstructionWriteBackParams<'a> {
+    pub should_stall: bool,
+    pub memory_access_value_in: MemoryAccessValue,
+    pub reg_file: &'a mut RegisterFile,
 }
 
 impl InstructionWriteBack {
-    pub fn new(params: InstructionWriteBackParams) -> Self {
-        Self {
-            should_stall: params.should_stall,
-            get_memory_access_value_in: params.get_memory_access_value_in,
-            reg_file: params.reg_file,
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
-impl PipelineStage for InstructionWriteBack {
-    fn compute(&mut self) {
-        if (self.should_stall)() {
+impl<'a> PipelineStage<InstructionWriteBackParams<'a>> for InstructionWriteBack {
+    fn compute(&mut self, params: InstructionWriteBackParams<'a>) {
+        if params.should_stall {
             return;
         }
-        let memory_access_value = (self.get_memory_access_value_in)();
+        let memory_access_value = params.memory_access_value_in;
         if memory_access_value.is_alu_operation {
-            self.reg_file.borrow_mut()[memory_access_value.rd as usize] =
-                memory_access_value.alu_result;
+            params.reg_file[memory_access_value.rd as usize] = memory_access_value.alu_result;
         }
     }
 

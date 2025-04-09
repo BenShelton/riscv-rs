@@ -24,19 +24,16 @@ pub struct InstructionDecode {
     imm11_0: LatchValue<u16>,
     funct7: LatchValue<u8>,
     shamt: LatchValue<u8>,
-    should_stall: Box<dyn Fn() -> bool>,
-    get_instruction_in: Box<dyn Fn() -> u32>,
-    reg_file: RegisterFile,
 }
 
-pub struct InstructionDecodeParams {
-    pub should_stall: Box<dyn Fn() -> bool>,
-    pub get_instruction_in: Box<dyn Fn() -> u32>,
-    pub reg_file: RegisterFile,
+pub struct InstructionDecodeParams<'a> {
+    pub should_stall: bool,
+    pub instruction_in: u32,
+    pub reg_file: &'a mut RegisterFile,
 }
 
 impl InstructionDecode {
-    pub fn new(params: InstructionDecodeParams) -> Self {
+    pub fn new() -> Self {
         Self {
             instruction: LatchValue::new(0),
             opcode: LatchValue::new(0),
@@ -47,9 +44,6 @@ impl InstructionDecode {
             imm11_0: LatchValue::new(0),
             funct7: LatchValue::new(0),
             shamt: LatchValue::new(0),
-            should_stall: params.should_stall,
-            get_instruction_in: params.get_instruction_in,
-            reg_file: params.reg_file,
         }
     }
 
@@ -68,12 +62,12 @@ impl InstructionDecode {
     }
 }
 
-impl PipelineStage for InstructionDecode {
-    fn compute(&mut self) {
-        if (self.should_stall)() {
+impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
+    fn compute(&mut self, params: InstructionDecodeParams<'a>) {
+        if params.should_stall {
             return;
         }
-        let instruction = (self.get_instruction_in)();
+        let instruction = params.instruction_in;
         self.instruction.set(instruction);
         self.opcode.set((instruction & 0x7F) as u8);
         self.rd.set(((instruction >> 7) & 0x1F) as u8);
@@ -85,11 +79,11 @@ impl PipelineStage for InstructionDecode {
         self.shamt.set(rs2_address);
         self.rs1.set(match rs1_address == 0 {
             true => 0,
-            false => self.reg_file.borrow()[rs1_address as usize],
+            false => params.reg_file[rs1_address as usize],
         });
         self.rs2.set(match rs2_address == 0 {
             true => 0,
-            false => self.reg_file.borrow()[rs2_address as usize],
+            false => params.reg_file[rs2_address as usize],
         });
     }
 

@@ -1,26 +1,21 @@
 use super::{LatchValue, PipelineStage};
 use crate::system_interface::{MMIODevice, PROGRAM_ROM_START, SystemInterface};
-use std::{cell::RefCell, rc::Rc};
 
 pub struct InstructionFetch {
     pc: LatchValue<u32>,
     instruction: LatchValue<u32>,
-    bus: Rc<RefCell<SystemInterface>>,
-    should_stall: Box<dyn Fn() -> bool>,
 }
 
-pub struct InstructionFetchParams {
-    pub bus: Rc<RefCell<SystemInterface>>,
-    pub should_stall: Box<dyn Fn() -> bool>,
+pub struct InstructionFetchParams<'a> {
+    pub should_stall: bool,
+    pub bus: &'a SystemInterface,
 }
 
 impl InstructionFetch {
-    pub fn new(params: InstructionFetchParams) -> Self {
+    pub fn new() -> Self {
         Self {
             pc: LatchValue::new(PROGRAM_ROM_START),
             instruction: LatchValue::new(0x0000_0000),
-            bus: params.bus,
-            should_stall: params.should_stall,
         }
     }
 
@@ -29,12 +24,12 @@ impl InstructionFetch {
     }
 }
 
-impl PipelineStage for InstructionFetch {
-    fn compute(&mut self) {
-        if (self.should_stall)() {
+impl<'a> PipelineStage<InstructionFetchParams<'a>> for InstructionFetch {
+    fn compute(&mut self, params: InstructionFetchParams<'a>) {
+        if params.should_stall {
             return;
         }
-        self.instruction.set(self.bus.borrow().read(*self.pc.get()));
+        self.instruction.set(params.bus.read(*self.pc.get()));
         self.pc.set(self.pc.get().wrapping_add(4));
     }
 
