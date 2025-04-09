@@ -16,7 +16,7 @@ use std::{cell::RefCell, rc::Rc};
 use system_interface::{RamDevice, RomDevice, SystemInterface};
 
 #[derive(PartialEq, Eq, Debug)]
-enum State {
+pub enum State {
     Fetch,
     Decode,
     Execute,
@@ -26,10 +26,10 @@ enum State {
 
 pub type RegisterFile = Rc<RefCell<[u32; 32]>>;
 
-struct RVI32System {
-    bus: Rc<RefCell<SystemInterface>>,
-    state: Rc<RefCell<State>>,
-    reg_file: RegisterFile,
+pub struct RVI32System {
+    pub bus: Rc<RefCell<SystemInterface>>,
+    pub state: Rc<RefCell<State>>,
+    pub reg_file: RegisterFile,
     stage_if: Rc<RefCell<InstructionFetch>>,
     stage_de: Rc<RefCell<InstructionDecode>>,
     stage_ex: Rc<RefCell<InstructionExecute>>,
@@ -147,6 +147,12 @@ impl RVI32System {
             State::MemoryAccess => State::WriteBack,
             State::WriteBack => State::Fetch,
         });
+    }
+}
+
+impl Default for RVI32System {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

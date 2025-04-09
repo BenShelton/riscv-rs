@@ -15,6 +15,12 @@ impl RamDevice {
     }
 }
 
+impl Default for RamDevice {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MMIODevice for RamDevice {
     fn read(&self, address: u32) -> u32 {
         let index = (address & RAM_MASK) as usize;

@@ -25,6 +25,12 @@ impl RomDevice {
     }
 }
 
+impl Default for RomDevice {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MMIODevice for RomDevice {
     fn read(&self, address: u32) -> u32 {
         let index = (address & ROM_MASK) as usize;
