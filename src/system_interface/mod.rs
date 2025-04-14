@@ -5,8 +5,12 @@ pub use ram::RamDevice;
 pub use rom::RomDevice;
 
 pub trait MMIODevice {
-    fn read(&self, address: u32) -> u32;
-    fn write(&mut self, address: u32, value: u32);
+    fn read_byte(&self, address: u32) -> u8;
+    fn write_byte(&mut self, address: u32, value: u8);
+    fn read_half_word(&self, address: u32) -> u16;
+    fn write_half_word(&mut self, address: u32, value: u16);
+    fn read_word(&self, address: u32) -> u32;
+    fn write_word(&mut self, address: u32, value: u32);
 }
 
 pub const PROGRAM_ROM_START: u32 = 0x1000_0000;
@@ -26,21 +30,75 @@ impl SystemInterface {
 }
 
 impl MMIODevice for SystemInterface {
-    fn read(&self, address: u32) -> u32 {
-        if address & 0b11 != 0 {
-            panic!("Unaligned read from address {:#08X}", address);
-        }
+    fn read_byte(&self, address: u32) -> u8 {
+        // if address & 0b11 != 0 {
+        //     panic!("Unaligned read from address {:#08X}", address);
+        // }
 
         if (address & PROGRAM_ROM_START) == PROGRAM_ROM_START {
-            self.rom.read((address & 0x0FFF_FFFF) >> 2)
+            self.rom.read_byte(address & 0x0FFF_FFFF)
         } else if (address & RAM_START) == RAM_START {
-            self.ram.read((address & 0x0FFF_FFFF) >> 2)
+            self.ram.read_byte(address & 0x0FFF_FFFF)
         } else {
             0
         }
     }
 
-    fn write(&mut self, address: u32, value: u32) {
+    fn read_half_word(&self, address: u32) -> u16 {
+        // if address & 0b11 != 0 {
+        //     panic!("Unaligned read from address {:#08X}", address);
+        // }
+
+        if (address & PROGRAM_ROM_START) == PROGRAM_ROM_START {
+            self.rom.read_half_word(address & 0x0FFF_FFFF)
+        } else if (address & RAM_START) == RAM_START {
+            self.ram.read_half_word(address & 0x0FFF_FFFF)
+        } else {
+            0
+        }
+    }
+
+    fn read_word(&self, address: u32) -> u32 {
+        if address & 0b11 != 0 {
+            panic!("Unaligned read from address {:#08X}", address);
+        }
+
+        if (address & PROGRAM_ROM_START) == PROGRAM_ROM_START {
+            self.rom.read_word(address & 0x0FFF_FFFF)
+        } else if (address & RAM_START) == RAM_START {
+            self.ram.read_word(address & 0x0FFF_FFFF)
+        } else {
+            0
+        }
+    }
+
+    fn write_byte(&mut self, address: u32, value: u8) {
+        // if address & 0b11 != 0 {
+        //     panic!(
+        //         "Unaligned write to address {:#08X} (value={:#08X})",
+        //         address, value
+        //     );
+        // }
+
+        if (address & RAM_START) == RAM_START {
+            self.ram.write_byte(address & 0x0FFF_FFFF, value)
+        }
+    }
+
+    fn write_half_word(&mut self, address: u32, value: u16) {
+        // if address & 0b11 != 0 {
+        //     panic!(
+        //         "Unaligned write to address {:#08X} (value={:#08X})",
+        //         address, value
+        //     );
+        // }
+
+        if (address & RAM_START) == RAM_START {
+            self.ram.write_half_word(address & 0x0FFF_FFFF, value)
+        }
+    }
+
+    fn write_word(&mut self, address: u32, value: u32) {
         if address & 0b11 != 0 {
             panic!(
                 "Unaligned write to address {:#08X} (value={:#08X})",
@@ -49,7 +107,7 @@ impl MMIODevice for SystemInterface {
         }
 
         if (address & RAM_START) == RAM_START {
-            self.ram.write((address & 0x0FFF_FFFF) >> 2, value)
+            self.ram.write_word(address & 0x0FFF_FFFF, value)
         }
     }
 }

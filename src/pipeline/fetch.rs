@@ -29,7 +29,7 @@ impl<'a> PipelineStage<InstructionFetchParams<'a>> for InstructionFetch {
         if params.should_stall {
             return;
         }
-        self.instruction.set(params.bus.read(*self.pc.get()));
+        self.instruction.set(params.bus.read_word(*self.pc.get()));
         self.pc.set(self.pc.get().wrapping_add(4));
     }
 

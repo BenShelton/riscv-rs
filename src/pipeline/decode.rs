@@ -12,6 +12,9 @@ pub struct DecodedInstruction {
     pub imm11_0: u16,
     pub funct7: u8,
     pub shamt: u8,
+    pub is_alu_operation: bool,
+    pub is_store_operation: bool,
+    pub imm32: u32,
 }
 
 pub struct InstructionDecode {
@@ -24,6 +27,9 @@ pub struct InstructionDecode {
     imm11_0: LatchValue<u16>,
     funct7: LatchValue<u8>,
     shamt: LatchValue<u8>,
+    is_alu_operation: LatchValue<bool>,
+    is_store_operation: LatchValue<bool>,
+    imm32: LatchValue<u32>,
 }
 
 pub struct InstructionDecodeParams<'a> {
@@ -44,6 +50,9 @@ impl InstructionDecode {
             imm11_0: LatchValue::new(0),
             funct7: LatchValue::new(0),
             shamt: LatchValue::new(0),
+            is_alu_operation: LatchValue::new(false),
+            is_store_operation: LatchValue::new(false),
+            imm32: LatchValue::new(0),
         }
     }
 
@@ -58,6 +67,9 @@ impl InstructionDecode {
             imm11_0: *self.imm11_0.get(),
             funct7: *self.funct7.get(),
             shamt: *self.shamt.get(),
+            is_alu_operation: *self.is_alu_operation.get(),
+            is_store_operation: *self.is_store_operation.get(),
+            imm32: *self.imm32.get(),
         }
     }
 }
@@ -69,10 +81,24 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
         }
         let instruction = params.instruction_in;
         self.instruction.set(instruction);
-        self.opcode.set((instruction & 0x7F) as u8);
+
+        let opcode = (instruction & 0x7F) as u8;
+        self.opcode.set(opcode);
+        let is_alu_operation = (opcode & 0b101_1111) == 0b001_0011;
+        self.is_alu_operation.set(is_alu_operation);
+        let is_store_operation = opcode == 0b010_0011;
+        self.is_store_operation.set(is_store_operation);
+
+        let imm11_0 = ((instruction >> 20) & 0xFFF) as u16;
+        self.imm11_0.set(imm11_0);
+        self.imm32
+            .set(match (is_alu_operation, is_store_operation) {
+                (_, true) => (((instruction >> 25) & 0x7F) << 5) | ((instruction >> 7) & 0x1F),
+                _ => imm11_0 as u32,
+            });
+
         self.rd.set(((instruction >> 7) & 0x1F) as u8);
         self.funct3.set(((instruction >> 12) & 0x07) as u8);
-        self.imm11_0.set(((instruction >> 20) & 0xFFF) as u16);
         self.funct7.set(((instruction >> 25) & 0x7F) as u8);
         let rs1_address = ((instruction >> 15) & 0x1F) as u8;
         let rs2_address = ((instruction >> 20) & 0x1F) as u8;
@@ -97,5 +123,8 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
         self.imm11_0.latch_next();
         self.funct7.latch_next();
         self.shamt.latch_next();
+        self.is_alu_operation.latch_next();
+        self.is_store_operation.latch_next();
+        self.imm32.latch_next();
     }
 }

@@ -1,12 +1,12 @@
 #![allow(clippy::unusual_byte_groupings)]
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use riscv::RVI32System;
+use riscv::RV32ISystem;
 
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("100 commands", |b| {
         b.iter(|| {
-            let mut rv = RVI32System::new();
+            let mut rv = RV32ISystem::new();
             rv.reg_file[1] = 0x0102_0304;
             rv.reg_file[2] = 0x0203_0405;
             rv.reg_file[10] = 0x8000_0000;
