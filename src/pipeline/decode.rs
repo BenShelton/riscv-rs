@@ -20,6 +20,12 @@ pub enum DecodedInstruction {
         rs2: u32,
         imm32: i32,
     },
+    Load {
+        funct3: u8,
+        rd: u8,
+        rs1: u32,
+        imm32: i32,
+    },
 }
 
 pub struct InstructionDecode {
@@ -91,6 +97,19 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                         12,
                         ((((instruction >> 25) & 0x7F) << 5) | ((instruction >> 7) & 0x1F)) as i32,
                     ),
+                });
+            }
+            0b000_0011 => {
+                let imm11_0 = ((instruction >> 20) & 0xFFF) as u16;
+                let rs1_address = ((instruction >> 15) & 0x1F) as u8;
+                self.instruction.set(DecodedInstruction::Load {
+                    funct3: ((instruction >> 12) & 0x07) as u8,
+                    rd: ((instruction >> 7) & 0x1F) as u8,
+                    rs1: match rs1_address == 0 {
+                        true => 0,
+                        false => params.reg_file[rs1_address as usize],
+                    },
+                    imm32: sign_extend_32(12, imm11_0 as i32),
                 });
             }
             _ => {

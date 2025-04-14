@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
-                alu_result: 0x0102_0305,
+                write_back_value: 0x0102_0305,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
                     rd: 0b00011,
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
-                alu_result: 0x0102_0305,
+                write_back_value: 0x0102_0305,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
                     rd: 0b00011,
@@ -279,7 +279,7 @@ mod tests {
         assert_eq!(
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
-                alu_result: 0x0305_0709,
+                write_back_value: 0x0305_0709,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b00100,
@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
-                alu_result: 0x0305_0709,
+                write_back_value: 0x0305_0709,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b00100,
@@ -345,7 +345,7 @@ mod tests {
         assert_eq!(
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
-                alu_result: 0x0101_0101,
+                write_back_value: 0x0101_0101,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b00100,
@@ -364,7 +364,7 @@ mod tests {
         assert_eq!(
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
-                alu_result: 0x0101_0101,
+                write_back_value: 0x0101_0101,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b00100,
@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
-                alu_result: 0x0102_0303,
+                write_back_value: 0x0102_0303,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
                     rd: 0b00011,
@@ -430,7 +430,7 @@ mod tests {
         assert_eq!(
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
-                alu_result: 0x0102_0303,
+                write_back_value: 0x0102_0303,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
                     rd: 0b00011,
@@ -477,7 +477,7 @@ mod tests {
         assert_eq!(
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
-                alu_result: 0x4000_0000,
+                write_back_value: 0x4000_0000,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b01100,
@@ -496,7 +496,7 @@ mod tests {
         assert_eq!(
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
-                alu_result: 0x4000_0000,
+                write_back_value: 0x4000_0000,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b01100,
@@ -543,7 +543,7 @@ mod tests {
         assert_eq!(
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
-                alu_result: 0xC000_0000,
+                write_back_value: 0xC000_0000,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b01100,
@@ -562,7 +562,7 @@ mod tests {
         assert_eq!(
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
-                alu_result: 0xC000_0000,
+                write_back_value: 0xC000_0000,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b01100,
@@ -606,7 +606,7 @@ mod tests {
         assert_eq!(
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
-                alu_result: 0x0000_0000,
+                write_back_value: 0x0000_0000,
                 instruction: DecodedInstruction::Store {
                     funct3: 0b010,
                     rs1: 0x2000_0000,
@@ -661,7 +661,7 @@ mod tests {
         assert_eq!(
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
-                alu_result: 0x0000_0000,
+                write_back_value: 0x0000_0000,
                 instruction: DecodedInstruction::Store {
                     funct3: 0b010,
                     rs1: 0x2000_0005,
@@ -672,8 +672,156 @@ mod tests {
         );
         assert_eq!(rv.state, State::WriteBack);
         rv.cycle();
-        assert_eq!((-1 + 0x2000_0005) as u32, 0x2000_0004);
         assert_eq!(rv.bus.read_word(0x2000_0004), 0xDEAD_BEEF);
+        assert_eq!(rv.state, State::Fetch);
+    }
+
+    #[test]
+    fn test_load_instructions() {
+        let mut rv = RV32ISystem::new();
+        rv.reg_file[1] = 0x2000_0000;
+        rv.reg_file[10] = 0x2000_0005;
+        rv.bus.write_word(0x2000_0004, 0xDEADBEEF);
+
+        rv.bus.rom.load(vec![
+            0b000000000100_00001_010_00010_0000011, // LW r2, r1, imm4
+            0b000000000110_00001_001_00011_0000011, // LHW r3, r1, imm6
+            0b000000000111_00001_000_00100_0000011, // LB r4, r1, imm7
+            0b000000000110_00001_101_00101_0000011, // LHWU r5, r1, imm6
+            0b000000000111_00001_100_00110_0000011, // LBU r6, r1, imm7
+            0b111111111111_01010_010_01011_0000011, // LW r11, r10, imm-1
+        ]);
+
+        // LW r2, r1, imm4
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(
+            rv.stage_ma.get_memory_access_value_out(),
+            MemoryAccessValue {
+                write_back_value: 0xDEAD_BEEF,
+                instruction: DecodedInstruction::Load {
+                    funct3: 0b010,
+                    rs1: 0x2000_0000,
+                    rd: 0b00010,
+                    imm32: 0b100,
+                }
+            }
+        );
+        assert_eq!(rv.state, State::WriteBack);
+        rv.cycle();
+        assert_eq!(rv.reg_file[2], 0xDEAD_BEEF);
+        assert_eq!(rv.state, State::Fetch);
+
+        // LHW r3, r1, imm6
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(
+            rv.stage_ma.get_memory_access_value_out(),
+            MemoryAccessValue {
+                write_back_value: 0xFFFF_BEEF,
+                instruction: DecodedInstruction::Load {
+                    funct3: 0b001,
+                    rs1: 0x2000_0000,
+                    rd: 0b00011,
+                    imm32: 0b110,
+                }
+            }
+        );
+        assert_eq!(rv.state, State::WriteBack);
+        rv.cycle();
+        assert_eq!(rv.reg_file[3], 0xFFFF_BEEF);
+        assert_eq!(rv.state, State::Fetch);
+
+        // LB r4, r1, imm7
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(
+            rv.stage_ma.get_memory_access_value_out(),
+            MemoryAccessValue {
+                write_back_value: 0xFFFF_FFEF,
+                instruction: DecodedInstruction::Load {
+                    funct3: 0b000,
+                    rs1: 0x2000_0000,
+                    rd: 0b00100,
+                    imm32: 0b111,
+                }
+            }
+        );
+        assert_eq!(rv.state, State::WriteBack);
+        rv.cycle();
+        assert_eq!(rv.reg_file[4], 0xFFFF_FFEF);
+        assert_eq!(rv.state, State::Fetch);
+
+        // LHWU r5, r1, imm6
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(
+            rv.stage_ma.get_memory_access_value_out(),
+            MemoryAccessValue {
+                write_back_value: 0x0000_BEEF,
+                instruction: DecodedInstruction::Load {
+                    funct3: 0b101,
+                    rs1: 0x2000_0000,
+                    rd: 0b00101,
+                    imm32: 0b110,
+                }
+            }
+        );
+        assert_eq!(rv.state, State::WriteBack);
+        rv.cycle();
+        assert_eq!(rv.reg_file[5], 0x0000_BEEF);
+        assert_eq!(rv.state, State::Fetch);
+
+        // LBU r6, r1, imm7
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(
+            rv.stage_ma.get_memory_access_value_out(),
+            MemoryAccessValue {
+                write_back_value: 0x0000_00EF,
+                instruction: DecodedInstruction::Load {
+                    funct3: 0b100,
+                    rs1: 0x2000_0000,
+                    rd: 0b00110,
+                    imm32: 0b111,
+                }
+            }
+        );
+        assert_eq!(rv.state, State::WriteBack);
+        rv.cycle();
+        assert_eq!(rv.reg_file[6], 0x0000_00EF);
+        assert_eq!(rv.state, State::Fetch);
+
+        // LW r11, r10, imm-1
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(
+            rv.stage_ma.get_memory_access_value_out(),
+            MemoryAccessValue {
+                write_back_value: 0xDEAD_BEEF,
+                instruction: DecodedInstruction::Load {
+                    funct3: 0b010,
+                    rs1: 0x2000_0005,
+                    rd: 0b01011,
+                    imm32: -1,
+                }
+            }
+        );
+        assert_eq!(rv.state, State::WriteBack);
+        rv.cycle();
+        assert_eq!(rv.reg_file[11], 0xDEAD_BEEF);
         assert_eq!(rv.state, State::Fetch);
     }
 }

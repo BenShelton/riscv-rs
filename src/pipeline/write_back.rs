@@ -24,10 +24,13 @@ impl<'a> PipelineStage<InstructionWriteBackParams<'a>> for InstructionWriteBack 
         let memory_access_value = params.memory_access_value_in;
         match memory_access_value.instruction {
             DecodedInstruction::Alu { rd, .. } => {
-                params.reg_file[rd as usize] = memory_access_value.alu_result;
+                params.reg_file[rd as usize] = memory_access_value.write_back_value;
             }
             DecodedInstruction::Store { .. } => {
                 // Store operations do not write back to the register file
+            }
+            DecodedInstruction::Load { rd, .. } => {
+                params.reg_file[rd as usize] = memory_access_value.write_back_value;
             }
             DecodedInstruction::None => {}
         }
