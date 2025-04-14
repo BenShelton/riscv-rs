@@ -195,18 +195,14 @@ mod tests {
         rv.cycle();
         assert_eq!(
             rv.stage_de.get_decoded_instruction_out(),
-            DecodedInstruction {
-                instruction: 0b000000000001_00001_000_00011_0010011,
+            DecodedInstruction::Alu {
                 opcode: 0b0010011,
                 rd: 0b00011,
                 funct3: 0b000,
                 imm11_0: 0b000000000001,
                 rs1: 0x0102_0304,
                 rs2: 0x0102_0304,
-                funct7: 0b0000000,
                 shamt: 0b00001,
-                is_alu_operation: true,
-                is_store_operation: false,
                 imm32: 0b000000000001,
             }
         );
@@ -217,13 +213,16 @@ mod tests {
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
                 alu_result: 0x0102_0305,
-                rd: 0b00011,
-                is_alu_operation: true,
-                is_store_operation: false,
-                imm32: 0b000000000001,
-                funct3: 0b000,
-                rs1: 0x0102_0304,
-                rs2: 0x0102_0304,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0010011,
+                    rd: 0b00011,
+                    funct3: 0b000,
+                    imm11_0: 0b000000000001,
+                    rs1: 0x0102_0304,
+                    rs2: 0x0102_0304,
+                    shamt: 0b00001,
+                    imm32: 0b000000000001,
+                }
             }
         );
         assert_eq!(rv.state, State::MemoryAccess);
@@ -233,8 +232,16 @@ mod tests {
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
                 alu_result: 0x0102_0305,
-                rd: 0b00011,
-                is_alu_operation: true,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0010011,
+                    rd: 0b00011,
+                    funct3: 0b000,
+                    imm11_0: 0b000000000001,
+                    rs1: 0x0102_0304,
+                    rs2: 0x0102_0304,
+                    shamt: 0b00001,
+                    imm32: 0b000000000001,
+                }
             }
         );
         assert_eq!(rv.state, State::WriteBack);
@@ -254,18 +261,14 @@ mod tests {
         rv.cycle();
         assert_eq!(
             rv.stage_de.get_decoded_instruction_out(),
-            DecodedInstruction {
-                instruction: 0b0000000_00001_00010_000_00100_0110011,
+            DecodedInstruction::Alu {
                 opcode: 0b0110011,
                 rd: 0b00100,
                 funct3: 0b000,
                 imm11_0: 0b000000000001,
                 rs1: 0x0203_0405,
                 rs2: 0x0102_0304,
-                funct7: 0b0000000,
                 shamt: 0b00001,
-                is_alu_operation: true,
-                is_store_operation: false,
                 imm32: 0b000000000001,
             }
         );
@@ -276,13 +279,16 @@ mod tests {
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
                 alu_result: 0x0305_0709,
-                rd: 0b00100,
-                is_alu_operation: true,
-                is_store_operation: false,
-                imm32: 0b000000000001,
-                funct3: 0b000,
-                rs1: 0x0203_0405,
-                rs2: 0x0102_0304,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0110011,
+                    rd: 0b00100,
+                    funct3: 0b000,
+                    imm11_0: 0b000000000001,
+                    rs1: 0x0203_0405,
+                    rs2: 0x0102_0304,
+                    shamt: 0b00001,
+                    imm32: 0b000000000001,
+                }
             }
         );
         assert_eq!(rv.state, State::MemoryAccess);
@@ -292,8 +298,16 @@ mod tests {
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
                 alu_result: 0x0305_0709,
-                rd: 0b00100,
-                is_alu_operation: true,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0110011,
+                    rd: 0b00100,
+                    funct3: 0b000,
+                    imm11_0: 0b000000000001,
+                    rs1: 0x0203_0405,
+                    rs2: 0x0102_0304,
+                    shamt: 0b00001,
+                    imm32: 0b000000000001,
+                }
             }
         );
         assert_eq!(rv.state, State::WriteBack);
@@ -313,18 +327,14 @@ mod tests {
         rv.cycle();
         assert_eq!(
             rv.stage_de.get_decoded_instruction_out(),
-            DecodedInstruction {
-                instruction: 0b0100000_00001_00010_000_00100_0110011,
+            DecodedInstruction::Alu {
                 opcode: 0b0110011,
                 rd: 0b00100,
                 funct3: 0b000,
                 imm11_0: 0b010000000001,
                 rs1: 0x0203_0405,
                 rs2: 0x0102_0304,
-                funct7: 0b0100000,
                 shamt: 0b00001,
-                is_alu_operation: true,
-                is_store_operation: false,
                 imm32: 0b010000000001,
             }
         );
@@ -335,13 +345,16 @@ mod tests {
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
                 alu_result: 0x0101_0101,
-                rd: 0b00100,
-                is_alu_operation: true,
-                is_store_operation: false,
-                imm32: 0b010000000001,
-                funct3: 0b000,
-                rs1: 0x0203_0405,
-                rs2: 0x0102_0304,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0110011,
+                    rd: 0b00100,
+                    funct3: 0b000,
+                    imm11_0: 0b010000000001,
+                    rs1: 0x0203_0405,
+                    rs2: 0x0102_0304,
+                    shamt: 0b00001,
+                    imm32: 0b010000000001,
+                }
             }
         );
         assert_eq!(rv.state, State::MemoryAccess);
@@ -351,8 +364,16 @@ mod tests {
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
                 alu_result: 0x0101_0101,
-                rd: 0b00100,
-                is_alu_operation: true,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0110011,
+                    rd: 0b00100,
+                    funct3: 0b000,
+                    imm11_0: 0b010000000001,
+                    rs1: 0x0203_0405,
+                    rs2: 0x0102_0304,
+                    shamt: 0b00001,
+                    imm32: 0b010000000001,
+                }
             }
         );
         assert_eq!(rv.state, State::WriteBack);
@@ -372,18 +393,14 @@ mod tests {
         rv.cycle();
         assert_eq!(
             rv.stage_de.get_decoded_instruction_out(),
-            DecodedInstruction {
-                instruction: 0b111111111111_00001_000_00011_0010011,
+            DecodedInstruction::Alu {
                 opcode: 0b0010011,
                 rd: 0b00011,
                 funct3: 0b000,
                 imm11_0: 0b111111111111,
                 rs1: 0x0102_0304,
                 rs2: 0x0000_0000,
-                funct7: 0b1111111,
                 shamt: 0b11111,
-                is_alu_operation: true,
-                is_store_operation: false,
                 imm32: 0b111111111111,
             }
         );
@@ -394,13 +411,16 @@ mod tests {
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
                 alu_result: 0x0102_1303,
-                rd: 0b00011,
-                is_alu_operation: true,
-                is_store_operation: false,
-                imm32: 0b111111111111,
-                funct3: 0b000,
-                rs1: 0x0102_0304,
-                rs2: 0x0000_0000,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0010011,
+                    rd: 0b00011,
+                    funct3: 0b000,
+                    imm11_0: 0b111111111111,
+                    rs1: 0x0102_0304,
+                    rs2: 0x0000_0000,
+                    shamt: 0b11111,
+                    imm32: 0b111111111111,
+                }
             }
         );
         assert_eq!(rv.state, State::MemoryAccess);
@@ -410,8 +430,16 @@ mod tests {
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
                 alu_result: 0x0102_1303,
-                rd: 0b00011,
-                is_alu_operation: true,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0010011,
+                    rd: 0b00011,
+                    funct3: 0b000,
+                    imm11_0: 0b111111111111,
+                    rs1: 0x0102_0304,
+                    rs2: 0x0000_0000,
+                    shamt: 0b11111,
+                    imm32: 0b111111111111,
+                }
             }
         );
         assert_eq!(rv.state, State::WriteBack);
@@ -431,18 +459,14 @@ mod tests {
         rv.cycle();
         assert_eq!(
             rv.stage_de.get_decoded_instruction_out(),
-            DecodedInstruction {
-                instruction: 0b0000000_01011_01010_101_01100_0110011,
+            DecodedInstruction::Alu {
                 opcode: 0b0110011,
                 rd: 0b01100,
                 funct3: 0b101,
                 imm11_0: 0b000000001011,
                 rs1: 0x8000_0000,
                 rs2: 0x0000_0001,
-                funct7: 0b0000000,
                 shamt: 0b01011,
-                is_alu_operation: true,
-                is_store_operation: false,
                 imm32: 0b000000001011,
             }
         );
@@ -453,13 +477,16 @@ mod tests {
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
                 alu_result: 0x4000_0000,
-                rd: 0b01100,
-                is_alu_operation: true,
-                is_store_operation: false,
-                imm32: 0b000000001011,
-                funct3: 0b101,
-                rs1: 0x8000_0000,
-                rs2: 0x0000_0001,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0110011,
+                    rd: 0b01100,
+                    funct3: 0b101,
+                    imm11_0: 0b000000001011,
+                    rs1: 0x8000_0000,
+                    rs2: 0x0000_0001,
+                    shamt: 0b01011,
+                    imm32: 0b000000001011,
+                }
             }
         );
         assert_eq!(rv.state, State::MemoryAccess);
@@ -469,8 +496,16 @@ mod tests {
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
                 alu_result: 0x4000_0000,
-                rd: 0b01100,
-                is_alu_operation: true,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0110011,
+                    rd: 0b01100,
+                    funct3: 0b101,
+                    imm11_0: 0b000000001011,
+                    rs1: 0x8000_0000,
+                    rs2: 0x0000_0001,
+                    shamt: 0b01011,
+                    imm32: 0b000000001011,
+                }
             }
         );
         assert_eq!(rv.state, State::WriteBack);
@@ -490,18 +525,14 @@ mod tests {
         rv.cycle();
         assert_eq!(
             rv.stage_de.get_decoded_instruction_out(),
-            DecodedInstruction {
-                instruction: 0b0100000_01011_01010_101_01100_0110011,
+            DecodedInstruction::Alu {
                 opcode: 0b0110011,
                 rd: 0b01100,
                 funct3: 0b101,
                 imm11_0: 0b010000001011,
                 rs1: 0x8000_0000,
                 rs2: 0x0000_0001,
-                funct7: 0b0100000,
                 shamt: 0b01011,
-                is_alu_operation: true,
-                is_store_operation: false,
                 imm32: 0b010000001011,
             }
         );
@@ -512,13 +543,16 @@ mod tests {
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
                 alu_result: 0xC000_0000,
-                rd: 0b01100,
-                is_alu_operation: true,
-                is_store_operation: false,
-                imm32: 0b010000001011,
-                funct3: 0b101,
-                rs1: 0x8000_0000,
-                rs2: 0x0000_0001,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0110011,
+                    rd: 0b01100,
+                    funct3: 0b101,
+                    imm11_0: 0b010000001011,
+                    rs1: 0x8000_0000,
+                    rs2: 0x0000_0001,
+                    shamt: 0b01011,
+                    imm32: 0b010000001011,
+                }
             }
         );
         assert_eq!(rv.state, State::MemoryAccess);
@@ -528,8 +562,16 @@ mod tests {
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
                 alu_result: 0xC000_0000,
-                rd: 0b01100,
-                is_alu_operation: true,
+                instruction: DecodedInstruction::Alu {
+                    opcode: 0b0110011,
+                    rd: 0b01100,
+                    funct3: 0b101,
+                    imm11_0: 0b010000001011,
+                    rs1: 0x8000_0000,
+                    rs2: 0x0000_0001,
+                    shamt: 0b01011,
+                    imm32: 0b010000001011,
+                }
             }
         );
         assert_eq!(rv.state, State::WriteBack);

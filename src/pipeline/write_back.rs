@@ -1,6 +1,6 @@
 use crate::RegisterFile;
 
-use super::{PipelineStage, memory_access::MemoryAccessValue};
+use super::{PipelineStage, decode::DecodedInstruction, memory_access::MemoryAccessValue};
 
 pub struct InstructionWriteBack {}
 
@@ -22,8 +22,14 @@ impl<'a> PipelineStage<InstructionWriteBackParams<'a>> for InstructionWriteBack 
             return;
         }
         let memory_access_value = params.memory_access_value_in;
-        if memory_access_value.is_alu_operation {
-            params.reg_file[memory_access_value.rd as usize] = memory_access_value.alu_result;
+        match memory_access_value.instruction {
+            DecodedInstruction::Alu { rd, .. } => {
+                params.reg_file[rd as usize] = memory_access_value.alu_result;
+            }
+            DecodedInstruction::Store { .. } => {
+                // Store operations do not write back to the register file
+            }
+            DecodedInstruction::None => {}
         }
     }
 

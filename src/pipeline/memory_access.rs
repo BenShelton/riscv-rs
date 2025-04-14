@@ -1,12 +1,11 @@
 use crate::system_interface::{MMIODevice, SystemInterface};
 
-use super::{LatchValue, PipelineStage, execute::ExecutionValue};
+use super::{LatchValue, PipelineStage, decode::DecodedInstruction, execute::ExecutionValue};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct MemoryAccessValue {
     pub alu_result: u32,
-    pub rd: u8,
-    pub is_alu_operation: bool,
+    pub instruction: DecodedInstruction,
 }
 
 const WIDTH_BYTE: u8 = 0b000;
@@ -15,8 +14,7 @@ const WIDTH_WORD: u8 = 0b010;
 
 pub struct InstructionMemoryAccess {
     alu_result: LatchValue<u32>,
-    rd: LatchValue<u8>,
-    is_alu_operation: LatchValue<bool>,
+    instruction: LatchValue<DecodedInstruction>,
 }
 
 pub struct InstructionMemoryAccessParams<'a> {
@@ -29,16 +27,14 @@ impl InstructionMemoryAccess {
     pub fn new() -> Self {
         Self {
             alu_result: LatchValue::new(0),
-            rd: LatchValue::new(0),
-            is_alu_operation: LatchValue::new(false),
+            instruction: LatchValue::new(DecodedInstruction::None),
         }
     }
 
     pub fn get_memory_access_value_out(&self) -> MemoryAccessValue {
         MemoryAccessValue {
             alu_result: *self.alu_result.get(),
-            rd: *self.rd.get(),
-            is_alu_operation: *self.is_alu_operation.get(),
+            instruction: *self.instruction.get(),
         }
     }
 }
@@ -49,32 +45,41 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
             return;
         }
         let execution_value = params.execution_value_in;
+        self.instruction.set(execution_value.instruction);
         self.alu_result.set(execution_value.alu_result);
-        self.rd.set(execution_value.rd);
-        self.is_alu_operation.set(execution_value.is_alu_operation);
 
-        if execution_value.is_store_operation {
-            let addr = execution_value.imm32 + execution_value.rs1;
-            match execution_value.funct3 {
-                WIDTH_BYTE => {
-                    params.bus.write_byte(addr, execution_value.rs2 as u8);
-                }
-                WIDTH_HALF => {
-                    params.bus.write_half_word(addr, execution_value.rs2 as u16);
-                }
-                WIDTH_WORD => {
-                    params.bus.write_word(addr, execution_value.rs2);
-                }
-                _ => {
-                    panic!("Invalid funct3 for store operation");
+        match execution_value.instruction {
+            DecodedInstruction::Alu { .. } => {
+                // ALU operations do not require memory access
+            }
+            DecodedInstruction::Store {
+                funct3,
+                imm32,
+                rs1,
+                rs2,
+            } => {
+                let addr = imm32 + rs1;
+                match funct3 {
+                    WIDTH_BYTE => {
+                        params.bus.write_byte(addr, rs2 as u8);
+                    }
+                    WIDTH_HALF => {
+                        params.bus.write_half_word(addr, rs2 as u16);
+                    }
+                    WIDTH_WORD => {
+                        params.bus.write_word(addr, rs2);
+                    }
+                    _ => {
+                        panic!("Invalid funct3 for store operation");
+                    }
                 }
             }
+            DecodedInstruction::None => {}
         }
     }
 
     fn latch_next(&mut self) {
         self.alu_result.latch_next();
-        self.rd.latch_next();
-        self.is_alu_operation.latch_next();
+        self.instruction.latch_next();
     }
 }
