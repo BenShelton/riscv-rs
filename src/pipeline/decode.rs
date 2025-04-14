@@ -1,5 +1,5 @@
 use super::{LatchValue, PipelineStage};
-use crate::RegisterFile;
+use crate::{RegisterFile, utils::sign_extend_32};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum DecodedInstruction {
@@ -12,13 +12,13 @@ pub enum DecodedInstruction {
         rd: u8,
         rs1: u32,
         rs2: u32,
-        imm32: u32,
+        imm32: i32,
     },
     Store {
         funct3: u8,
         rs1: u32,
         rs2: u32,
-        imm32: u32,
+        imm32: i32,
     },
 }
 
@@ -71,7 +71,7 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                         true => 0,
                         false => params.reg_file[rs2_address as usize],
                     },
-                    imm32: imm11_0 as u32,
+                    imm32: sign_extend_32(12, imm11_0 as i32),
                 });
             }
             0b010_0011 => {
@@ -87,7 +87,10 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                         true => 0,
                         false => params.reg_file[rs2_address as usize],
                     },
-                    imm32: (((instruction >> 25) & 0x7F) << 5) | ((instruction >> 7) & 0x1F),
+                    imm32: sign_extend_32(
+                        12,
+                        ((((instruction >> 25) & 0x7F) << 5) | ((instruction >> 7) & 0x1F)) as i32,
+                    ),
                 });
             }
             _ => {

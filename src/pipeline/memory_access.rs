@@ -58,7 +58,7 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                 rs1,
                 rs2,
             } => {
-                let addr = imm32 + rs1;
+                let addr = (imm32 + rs1 as i32) as u32;
                 match funct3 {
                     WIDTH_BYTE => {
                         params.bus.write_byte(addr, rs2 as u8);

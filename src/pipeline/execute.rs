@@ -67,7 +67,7 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
                         if is_register_op {
                             if is_alternate { rs1 - rs2 } else { rs1 + rs2 }
                         } else {
-                            rs1 + imm32
+                            (rs1 as i32).saturating_add(imm32) as u32
                         }
                     }
                     ALU_OPERATION_SLL => {
@@ -81,21 +81,21 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
                         if is_register_op {
                             ((rs1 as i32) < (rs2 as i32)).into()
                         } else {
-                            ((rs1 as i32) < (imm32 as i32)).into()
+                            ((rs1 as i32) < imm32).into()
                         }
                     }
                     ALU_OPERATION_SLTU => {
                         if is_register_op {
                             (rs1 < rs2).into()
                         } else {
-                            (rs1 < imm32).into()
+                            (rs1 < (imm32 as u32)).into()
                         }
                     }
                     ALU_OPERATION_XOR => {
                         if is_register_op {
                             rs1 ^ rs2
                         } else {
-                            rs1 ^ imm32
+                            rs1 ^ (imm32 as u32)
                         }
                     }
                     ALU_OPERATION_SR => {
@@ -113,14 +113,14 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
                         if is_register_op {
                             rs1 | rs2
                         } else {
-                            rs1 | imm32
+                            rs1 | (imm32 as u32)
                         }
                     }
                     ALU_OPERATION_AND => {
                         if is_register_op {
                             rs1 & rs2
                         } else {
-                            rs1 & imm32
+                            rs1 & (imm32 as u32)
                         }
                     }
                     _ => 0,

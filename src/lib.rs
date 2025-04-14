@@ -3,6 +3,7 @@
 
 mod pipeline;
 mod system_interface;
+mod utils;
 
 use pipeline::{
     PipelineStage,
@@ -179,7 +180,7 @@ mod tests {
             0b000000000001_00001_000_00011_0010011,  // ADDI 1, r1, r3
             0b0000000_00001_00010_000_00100_0110011, // ADD r1, r2, r4
             0b0100000_00001_00010_000_00100_0110011, // SUB r1, r2, r4
-            0b111111111111_00001_000_00011_0010011,  // ADDI 4095, r1, r3
+            0b111111111111_00001_000_00011_0010011,  // ADDI -1, r1, r3
             0b0000000_01011_01010_101_01100_0110011, // SRL r10, r11, r12
             0b0100000_01011_01010_101_01100_0110011, // SRA r10, r11, r12
         ]);
@@ -382,7 +383,7 @@ mod tests {
         assert_eq!(rv.reg_file[0b00100], 0x0101_0101);
         assert_eq!(rv.state, State::Fetch);
 
-        // ADDI 4095, r1, r3
+        // ADDI -1, r1, r3
         rv.cycle();
         assert_eq!(
             rv.stage_if.get_instruction_out(),
@@ -401,7 +402,7 @@ mod tests {
                 rs1: 0x0102_0304,
                 rs2: 0x0000_0000,
                 shamt: 0b11111,
-                imm32: 0b111111111111,
+                imm32: -1,
             }
         );
         assert_eq!(rv.state, State::Execute);
@@ -410,7 +411,7 @@ mod tests {
         assert_eq!(
             rv.stage_ex.get_execution_value_out(),
             ExecutionValue {
-                alu_result: 0x0102_1303,
+                alu_result: 0x0102_0303,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
                     rd: 0b00011,
@@ -419,7 +420,7 @@ mod tests {
                     rs1: 0x0102_0304,
                     rs2: 0x0000_0000,
                     shamt: 0b11111,
-                    imm32: 0b111111111111,
+                    imm32: -1,
                 }
             }
         );
@@ -429,7 +430,7 @@ mod tests {
         assert_eq!(
             rv.stage_ma.get_memory_access_value_out(),
             MemoryAccessValue {
-                alu_result: 0x0102_1303,
+                alu_result: 0x0102_0303,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
                     rd: 0b00011,
@@ -438,14 +439,14 @@ mod tests {
                     rs1: 0x0102_0304,
                     rs2: 0x0000_0000,
                     shamt: 0b11111,
-                    imm32: 0b111111111111,
+                    imm32: -1,
                 }
             }
         );
         assert_eq!(rv.state, State::WriteBack);
 
         rv.cycle();
-        assert_eq!(rv.reg_file[0b00011], 0x0102_1303);
+        assert_eq!(rv.reg_file[0b00011], 0x0102_0303);
         assert_eq!(rv.state, State::Fetch);
 
         // SRL r10, r11, r12
@@ -602,9 +603,22 @@ mod tests {
         rv.cycle();
         rv.cycle();
         rv.cycle();
+        assert_eq!(
+            rv.stage_ma.get_memory_access_value_out(),
+            MemoryAccessValue {
+                alu_result: 0x0000_0000,
+                instruction: DecodedInstruction::Store {
+                    funct3: 0b010,
+                    rs1: 0x2000_0000,
+                    rs2: 0xDEAD_BEEF,
+                    imm32: 0b100,
+                }
+            }
+        );
+        assert_eq!(rv.state, State::WriteBack);
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
         assert_eq!(rv.bus.read_word(0x2000_0004), 0xDEAD_BEEF);
+        assert_eq!(rv.state, State::Fetch);
 
         // SHW r3, r1, imm6
         rv.cycle();
@@ -612,8 +626,8 @@ mod tests {
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
         assert_eq!(rv.bus.read_word(0x2000_0004), 0xDEAD_CAFE);
+        assert_eq!(rv.state, State::Fetch);
 
         // SB r4, r1, imm5
         rv.cycle();
@@ -644,8 +658,22 @@ mod tests {
         rv.cycle();
         rv.cycle();
         rv.cycle();
+        assert_eq!(
+            rv.stage_ma.get_memory_access_value_out(),
+            MemoryAccessValue {
+                alu_result: 0x0000_0000,
+                instruction: DecodedInstruction::Store {
+                    funct3: 0b010,
+                    rs1: 0x2000_0005,
+                    rs2: 0xDEAD_BEEF,
+                    imm32: -1,
+                }
+            }
+        );
+        assert_eq!(rv.state, State::WriteBack);
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!((-1 + 0x2000_0005) as u32, 0x2000_0004);
         assert_eq!(rv.bus.read_word(0x2000_0004), 0xDEAD_BEEF);
+        assert_eq!(rv.state, State::Fetch);
     }
 }
