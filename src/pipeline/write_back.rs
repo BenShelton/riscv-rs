@@ -32,6 +32,9 @@ impl<'a> PipelineStage<InstructionWriteBackParams<'a>> for InstructionWriteBack 
             DecodedInstruction::Load { rd, .. } => {
                 params.reg_file[rd as usize] = memory_access_value.write_back_value;
             }
+            DecodedInstruction::Lui { rd, .. } => {
+                params.reg_file[rd as usize] = memory_access_value.write_back_value;
+            }
             DecodedInstruction::None => {}
         }
     }

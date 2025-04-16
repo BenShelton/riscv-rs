@@ -824,4 +824,52 @@ mod tests {
         assert_eq!(rv.reg_file[11], 0xDEAD_BEEF);
         assert_eq!(rv.state, State::Fetch);
     }
+
+    #[test]
+    fn test_lui_instructions() {
+        let mut rv = RV32ISystem::new();
+
+        rv.bus.rom.load(vec![
+            0b10101010101010101010_00001_0110111,   // LUI r1, 0xAAAAA
+            0b101010101010_00001_000_00001_0010011, // ADDI r1, r1, 0xAAA
+        ]);
+
+        // LUI r1, 0xAAAAA
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(
+            rv.stage_de.get_decoded_instruction_out(),
+            DecodedInstruction::Lui {
+                rd: 0b00001,
+                imm32: 0b10101010101010101010_000000000000,
+            }
+        );
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.reg_file[1], 0xAAAA_A000);
+
+        // ADDI r1, 0xAAAAA
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(
+            rv.stage_de.get_decoded_instruction_out(),
+            DecodedInstruction::Alu {
+                opcode: 0b0010011,
+                rd: 0b00001,
+                funct3: 0b000,
+                imm11_0: 0xAAA,
+                rs1: 0xAAAA_A000,
+                rs2: 0b000,
+                shamt: 0b01010,
+                imm32: -1366,
+            }
+        );
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.reg_file[1], 0xAAAA_9AAA);
+    }
 }
