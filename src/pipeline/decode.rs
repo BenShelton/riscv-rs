@@ -136,7 +136,7 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                     | slice_32(19, 12, instruction, 19)
                     | bit(20, instruction, 11)
                     | slice_32(30, 21, instruction, 10);
-                let imm32 = sign_extend_32(21, restructured_imm as i32);
+                let imm32 = sign_extend_32(21, (restructured_imm << 1) as i32);
                 self.instruction.set(DecodedInstruction::Jal {
                     rd: ((instruction >> 7) & 0x1F) as u8,
                     branch_address: (params.instruction_in.pc + imm32 as u32),

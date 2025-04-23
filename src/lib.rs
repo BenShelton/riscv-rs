@@ -913,19 +913,35 @@ mod tests {
         let mut rv = RV32ISystem::new();
 
         rv.bus.rom.load(vec![
-            0b1_0110011100_0_11110000_00001_1101111, // JAL r1, 0xAAAAA
+            0,
+            0,
+            0b0_0000011110_0_00000000_00000_1101111, // JAL r0, 0x44
         ]);
 
-        // JAL r1, 0xAAAAA
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
+
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
+
+        // JAL r0, 0x44
         rv.cycle();
         rv.cycle();
         assert_eq!(
             rv.stage_de.get_decoded_instruction_out(),
             DecodedInstruction::Jal {
-                rd: 0b00001,
-                branch_address: 0x1000_0000 + 0b1_11110000_0_0110011100,
-                pc: 0x1000_0000,
-                pc_plus_4: 0x1000_0004,
+                rd: 0b00000,
+                branch_address: 0x1000_0044,
+                pc: 0x1000_0008,
+                pc_plus_4: 0x1000_000C,
             }
         );
         assert_eq!(rv.state, State::Execute);
@@ -933,5 +949,14 @@ mod tests {
         rv.cycle();
         rv.cycle();
         assert_eq!(rv.state, State::Fetch);
+        rv.cycle();
+        assert_eq!(
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                pc: 0x1000_0044,
+                pc_plus_4: 0x1000_0048,
+                instruction: 0xFFFF_FFFF,
+            }
+        );
     }
 }
