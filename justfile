@@ -19,11 +19,11 @@ test:
 
 # Compiles the `main.c` file in the `system_code` directory
 [working-directory: 'system_code']
-system-compile:
-    ../xpacks/.bin/riscv-none-elf-gcc -T link.ld -nostdlib bootloader.S main.c -o main
+@system-compile:
+    ../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -T link.ld -nostdlib bootloader.S main.c -o main
     ../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .text main main.bin
 
-# Compiles the `main.c` file & then shows the disassembly of the binary
+# Shows the disassembly of the compiled `main.c` binary
 [working-directory: 'system_code']
-system-dump: system-compile
-    ../xpacks/.bin/riscv-none-elf-objdump -d main -M no-aliases
+@system-dump: system-compile
+    ../xpacks/.bin/riscv-none-elf-objdump -d main -M no-aliases,numeric

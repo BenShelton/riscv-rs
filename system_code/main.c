@@ -4,17 +4,17 @@
 const unsigned int someGlobal[] = {1, 2, 3, 4, 5};
 
 int fortyTwoWithSideEffects() {
-WRITE_TO(RAM_START, 0x30040f00);
+    WRITE_TO(RAM_START, 0x30040f00);
 
-return 42;
+    return 42;
 }
 
 int main() {
-int result = fortyTwoWithSideEffects();
-WRITE_TO(RAM_START + 0x04, result + someGlobal[1]);
+    int result = fortyTwoWithSideEffects();
+    WRITE_TO(RAM_START + 0x04, result + someGlobal[1]);
 
-// Loop forever
-while (1) {}
+    // Loop forever
+    while (1) {}
 
-return 0;
+    return 0;
 }

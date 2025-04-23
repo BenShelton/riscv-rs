@@ -23,7 +23,7 @@ impl Default for RamDevice {
 
 impl MMIODevice for RamDevice {
     fn read_byte(&self, address: u32) -> u8 {
-        let index = (address >> 2 & RAM_MASK) as usize;
+        let index = ((address >> 2) & RAM_MASK) as usize;
         let value = self.ram[index];
         (match address & 0b11 {
             0b00 => (value & 0xFF00_0000) >> 24,
@@ -34,7 +34,7 @@ impl MMIODevice for RamDevice {
     }
 
     fn read_half_word(&self, address: u32) -> u16 {
-        let index = (address >> 2 & RAM_MASK) as usize;
+        let index = ((address >> 2) & RAM_MASK) as usize;
         let value = self.ram[index];
         (match address & 0b10 {
             0b0 => (value & 0xFFFF_0000) >> 16,
@@ -43,12 +43,12 @@ impl MMIODevice for RamDevice {
     }
 
     fn read_word(&self, address: u32) -> u32 {
-        let index = (address >> 2 & RAM_MASK) as usize;
+        let index = ((address >> 2) & RAM_MASK) as usize;
         self.ram[index]
     }
 
     fn write_byte(&mut self, address: u32, value: u8) {
-        let index = (address >> 2 & RAM_MASK) as usize;
+        let index = ((address >> 2) & RAM_MASK) as usize;
         let current_value = self.ram[index];
         self.ram[index] = match address & 0b11 {
             0b00 => (current_value & 0x00FF_FFFF) | ((value as u32) << 24),
@@ -59,7 +59,7 @@ impl MMIODevice for RamDevice {
     }
 
     fn write_half_word(&mut self, address: u32, value: u16) {
-        let index = (address >> 2 & RAM_MASK) as usize;
+        let index = ((address >> 2) & RAM_MASK) as usize;
         let current_value = self.ram[index];
         self.ram[index] = match address & 0b10 {
             0b0 => (current_value & 0x0000_FFFF) | ((value as u32) << 16),
@@ -68,7 +68,7 @@ impl MMIODevice for RamDevice {
     }
 
     fn write_word(&mut self, address: u32, value: u32) {
-        let index = (address >> 2 & RAM_MASK) as usize;
+        let index = ((address >> 2) & RAM_MASK) as usize;
         self.ram[index] = value;
     }
 }
