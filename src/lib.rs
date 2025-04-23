@@ -7,7 +7,7 @@ mod utils;
 
 use pipeline::{
     PipelineStage,
-    decode::{InstructionDecode, InstructionDecodeParams},
+    decode::{DecodedInstruction, InstructionDecode, InstructionDecodeParams},
     execute::{InstructionExecute, InstructionExecuteParams},
     fetch::{InstructionFetch, InstructionFetchParams},
     memory_access::{InstructionMemoryAccess, InstructionMemoryAccessParams},
@@ -57,11 +57,21 @@ impl RV32ISystem {
     pub fn compute(&mut self) {
         self.stage_if.compute(InstructionFetchParams {
             should_stall: self.state != State::Fetch,
+            branch_address: match self.stage_de.get_decoded_instruction_out() {
+                DecodedInstruction::Jal { branch_address, .. } => {
+                    if self.state == State::Fetch {
+                        Some(branch_address)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
             bus: &self.bus,
         });
         self.stage_de.compute(InstructionDecodeParams {
             should_stall: self.state != State::Decode,
-            instruction_in: self.stage_if.get_instruction_out(),
+            instruction_in: self.stage_if.get_instruction_value_out(),
             reg_file: &mut self.reg_file,
         });
         self.stage_ex.compute(InstructionExecuteParams {
@@ -113,7 +123,8 @@ mod tests {
     use super::*;
     use crate::{
         pipeline::{
-            decode::DecodedInstruction, execute::ExecutionValue, memory_access::MemoryAccessValue,
+            decode::DecodedInstruction, execute::ExecutionValue, fetch::InstructionValue,
+            memory_access::MemoryAccessValue,
         },
         system_interface::MMIODevice,
     };
@@ -188,8 +199,12 @@ mod tests {
         // ADDI 1, r1, r3
         rv.cycle();
         assert_eq!(
-            rv.stage_if.get_instruction_out(),
-            0b000000000001_00001_000_00011_0010011
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                pc: 0x1000_0000,
+                pc_plus_4: 0x1000_0004,
+                instruction: 0b000000000001_00001_000_00011_0010011
+            }
         );
         assert_eq!(rv.state, State::Decode);
 
@@ -254,8 +269,12 @@ mod tests {
         // ADD r1, r2, r4
         rv.cycle();
         assert_eq!(
-            rv.stage_if.get_instruction_out(),
-            0b0000000_00001_00010_000_00100_0110011
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                pc: 0x1000_0004,
+                pc_plus_4: 0x1000_0008,
+                instruction: 0b0000000_00001_00010_000_00100_0110011
+            }
         );
         assert_eq!(rv.state, State::Decode);
 
@@ -320,8 +339,12 @@ mod tests {
         // SUB r1, r2, r4
         rv.cycle();
         assert_eq!(
-            rv.stage_if.get_instruction_out(),
-            0b0100000_00001_00010_000_00100_0110011
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                pc: 0x1000_0008,
+                pc_plus_4: 0x1000_000C,
+                instruction: 0b0100000_00001_00010_000_00100_0110011
+            }
         );
         assert_eq!(rv.state, State::Decode);
 
@@ -386,8 +409,12 @@ mod tests {
         // ADDI -1, r1, r3
         rv.cycle();
         assert_eq!(
-            rv.stage_if.get_instruction_out(),
-            0b111111111111_00001_000_00011_0010011
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                pc: 0x1000_000C,
+                pc_plus_4: 0x1000_0010,
+                instruction: 0b111111111111_00001_000_00011_0010011
+            }
         );
         assert_eq!(rv.state, State::Decode);
 
@@ -452,8 +479,12 @@ mod tests {
         // SRL r10, r11, r12
         rv.cycle();
         assert_eq!(
-            rv.stage_if.get_instruction_out(),
-            0b0000000_01011_01010_101_01100_0110011
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                pc: 0x1000_0010,
+                pc_plus_4: 0x1000_0014,
+                instruction: 0b0000000_01011_01010_101_01100_0110011
+            }
         );
         assert_eq!(rv.state, State::Decode);
 
@@ -518,8 +549,12 @@ mod tests {
         // SRA r10, r11, r12
         rv.cycle();
         assert_eq!(
-            rv.stage_if.get_instruction_out(),
-            0b0100000_01011_01010_101_01100_0110011
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                pc: 0x1000_0014,
+                pc_plus_4: 0x1000_0018,
+                instruction: 0b0100000_01011_01010_101_01100_0110011
+            }
         );
         assert_eq!(rv.state, State::Decode);
 
@@ -871,5 +906,32 @@ mod tests {
         rv.cycle();
         assert_eq!(rv.state, State::Fetch);
         assert_eq!(rv.reg_file[1], 0xAAAA_9AAA);
+    }
+
+    #[test]
+    fn test_jal_instructions() {
+        let mut rv = RV32ISystem::new();
+
+        rv.bus.rom.load(vec![
+            0b1_0110011100_0_11110000_00001_1101111, // JAL r1, 0xAAAAA
+        ]);
+
+        // JAL r1, 0xAAAAA
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(
+            rv.stage_de.get_decoded_instruction_out(),
+            DecodedInstruction::Jal {
+                rd: 0b00001,
+                branch_address: 0x1000_0000 + 0b1_11110000_0_0110011100,
+                pc: 0x1000_0000,
+                pc_plus_4: 0x1000_0004,
+            }
+        );
+        assert_eq!(rv.state, State::Execute);
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
     }
 }

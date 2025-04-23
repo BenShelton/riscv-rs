@@ -1,13 +1,22 @@
 use super::{LatchValue, PipelineStage};
 use crate::system_interface::{MMIODevice, PROGRAM_ROM_START, SystemInterface};
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct InstructionValue {
+    pub pc: u32,
+    pub pc_plus_4: u32,
+    pub instruction: u32,
+}
+
 pub struct InstructionFetch {
     pc: LatchValue<u32>,
+    pc_plus_4: LatchValue<u32>,
     instruction: LatchValue<u32>,
 }
 
 pub struct InstructionFetchParams<'a> {
     pub should_stall: bool,
+    pub branch_address: Option<u32>,
     pub bus: &'a SystemInterface,
 }
 
@@ -15,12 +24,17 @@ impl InstructionFetch {
     pub fn new() -> Self {
         Self {
             pc: LatchValue::new(PROGRAM_ROM_START),
+            pc_plus_4: LatchValue::new(PROGRAM_ROM_START),
             instruction: LatchValue::new(0x0000_0000),
         }
     }
 
-    pub fn get_instruction_out(&self) -> u32 {
-        *self.instruction.get()
+    pub fn get_instruction_value_out(&self) -> InstructionValue {
+        InstructionValue {
+            pc: *self.pc.get(),
+            pc_plus_4: *self.pc_plus_4.get(),
+            instruction: *self.instruction.get(),
+        }
     }
 }
 
@@ -29,12 +43,18 @@ impl<'a> PipelineStage<InstructionFetchParams<'a>> for InstructionFetch {
         if params.should_stall {
             return;
         }
-        self.instruction.set(params.bus.read_word(*self.pc.get()));
-        self.pc.set(self.pc.get().wrapping_add(4));
+        let next_address = match params.branch_address {
+            Some(branch_address) => branch_address,
+            None => *self.pc_plus_4.get(),
+        };
+        self.instruction.set(params.bus.read_word(next_address));
+        self.pc.set(next_address);
+        self.pc_plus_4.set(next_address.wrapping_add(4));
     }
 
     fn latch_next(&mut self) {
         self.instruction.latch_next();
         self.pc.latch_next();
+        self.pc_plus_4.latch_next();
     }
 }

@@ -1,5 +1,8 @@
-use super::{LatchValue, PipelineStage};
-use crate::{RegisterFile, utils::sign_extend_32};
+use super::{LatchValue, PipelineStage, fetch::InstructionValue};
+use crate::{
+    RegisterFile,
+    utils::{bit, sign_extend_32, slice_32},
+};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum DecodedInstruction {
@@ -30,6 +33,12 @@ pub enum DecodedInstruction {
         rd: u8,
         imm32: u32,
     },
+    Jal {
+        rd: u8,
+        branch_address: u32,
+        pc: u32,
+        pc_plus_4: u32,
+    },
 }
 
 pub struct InstructionDecode {
@@ -38,7 +47,7 @@ pub struct InstructionDecode {
 
 pub struct InstructionDecodeParams<'a> {
     pub should_stall: bool,
-    pub instruction_in: u32,
+    pub instruction_in: InstructionValue,
     pub reg_file: &'a mut RegisterFile,
 }
 
@@ -59,7 +68,7 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
         if params.should_stall {
             return;
         }
-        let instruction = params.instruction_in;
+        let instruction = params.instruction_in.instruction;
 
         let opcode = (instruction & 0x7F) as u8;
         match opcode {
@@ -120,6 +129,30 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                 self.instruction.set(DecodedInstruction::Lui {
                     rd: ((instruction >> 7) & 0x1F) as u8,
                     imm32: (instruction >> 12) << 12,
+                });
+            }
+            0b1101111 => {
+                let restructured_imm = bit(31, instruction, 20)
+                    | slice_32(19, 12, instruction, 19)
+                    | bit(20, instruction, 11)
+                    | slice_32(30, 21, instruction, 10);
+                let imm32 = sign_extend_32(21, restructured_imm as i32);
+                self.instruction.set(DecodedInstruction::Jal {
+                    rd: ((instruction >> 7) & 0x1F) as u8,
+                    branch_address: (params.instruction_in.pc + imm32 as u32),
+                    pc: params.instruction_in.pc,
+                    pc_plus_4: params.instruction_in.pc_plus_4,
+                });
+            }
+            0b1100111 => {
+                let imm11_0 = ((instruction >> 20) & 0xFFF) as u16;
+                let i_imm = sign_extend_32(12, imm11_0 as i32);
+                let imm32 = slice_32(11, 1, i_imm as u32, 11);
+                self.instruction.set(DecodedInstruction::Jal {
+                    rd: ((instruction >> 7) & 0x1F) as u8,
+                    branch_address: params.instruction_in.pc + imm32,
+                    pc: params.instruction_in.pc,
+                    pc_plus_4: params.instruction_in.pc_plus_4,
                 });
             }
             _ => {
