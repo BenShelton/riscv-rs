@@ -17,6 +17,10 @@ bootstrap:
 test:
   cargo nextest run --no-fail-fast
 
+# Runs benchmarks
+bench:
+  cargo bench
+
 # Compiles the specified `.c` file in the `tests/binaries` directory
 [working-directory: 'system_code']
 @binary-compile filename:
