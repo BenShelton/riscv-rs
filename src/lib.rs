@@ -129,6 +129,17 @@ mod tests {
         system_interface::MMIODevice,
     };
 
+    macro_rules! run_instruction {
+        ($rv:expr) => {
+            $rv.cycle();
+            $rv.cycle();
+            $rv.cycle();
+            $rv.cycle();
+            $rv.cycle();
+            assert_eq!($rv.state, State::Fetch);
+        };
+    }
+
     #[test]
     fn test_rom_read() {
         let mut rv = RV32ISystem::new();
@@ -656,21 +667,11 @@ mod tests {
         assert_eq!(rv.state, State::Fetch);
 
         // SHW r3, r1, imm6
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
+        run_instruction!(rv);
         assert_eq!(rv.bus.read_word(0x2000_0004), 0xDEAD_CAFE);
-        assert_eq!(rv.state, State::Fetch);
 
         // SB r4, r1, imm5
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        run_instruction!(rv);
         assert_eq!(rv.bus.read_word(0x2000_0004), 0xDEEA_CAFE);
         assert_eq!(rv.bus.read_half_word(0x2000_0004), 0xDEEA);
         assert_eq!(rv.bus.read_half_word(0x2000_0006), 0xCAFE);
@@ -916,21 +917,30 @@ mod tests {
             0,
             0,
             0b0_0000011110_0_00000000_00000_1101111, // JAL r0, 0x44
+            0,                                       // second jump returns here
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0, // first jump lands here
+            0,
+            0,
+            0,
+            0b1_1111011100_1_11111111_00001_1101111, // JAL r1, 0xFFFDC
         ]);
 
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
-
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        for _ in 0..2 {
+            run_instruction!(rv);
+        }
 
         // JAL r0, 0x44
         rv.cycle();
@@ -949,14 +959,65 @@ mod tests {
         rv.cycle();
         rv.cycle();
         assert_eq!(rv.state, State::Fetch);
+
         rv.cycle();
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
                 pc: 0x1000_0044,
                 pc_plus_4: 0x1000_0048,
-                instruction: 0xFFFF_FFFF,
+                instruction: 0,
             }
         );
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
+
+        for _ in 0..3 {
+            run_instruction!(rv);
+        }
+
+        // JAL r1, 0xFFFDC
+        rv.cycle();
+        assert_eq!(
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                instruction: 0b1_1111011100_1_11111111_00001_1101111,
+                pc: 0x1000_0054,
+                pc_plus_4: 0x1000_0058,
+            }
+        );
+        rv.cycle();
+        assert_eq!(
+            rv.stage_de.get_decoded_instruction_out(),
+            DecodedInstruction::Jal {
+                rd: 0b00001,
+                branch_address: 0x1000_000C,
+                pc: 0x1000_0054,
+                pc_plus_4: 0x1000_0058,
+            }
+        );
+        assert_eq!(rv.state, State::Execute);
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
+
+        rv.cycle();
+        assert_eq!(
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                pc: 0x1000_000C,
+                pc_plus_4: 0x1000_0010,
+                instruction: 0,
+            }
+        );
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
     }
 }

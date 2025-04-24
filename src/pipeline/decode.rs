@@ -139,7 +139,7 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                 let imm32 = sign_extend_32(21, (restructured_imm << 1) as i32);
                 self.instruction.set(DecodedInstruction::Jal {
                     rd: ((instruction >> 7) & 0x1F) as u8,
-                    branch_address: (params.instruction_in.pc + imm32 as u32),
+                    branch_address: params.instruction_in.pc.saturating_add_signed(imm32),
                     pc: params.instruction_in.pc,
                     pc_plus_4: params.instruction_in.pc_plus_4,
                 });
