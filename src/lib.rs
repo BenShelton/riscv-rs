@@ -2,7 +2,7 @@
 #![allow(clippy::unusual_byte_groupings)]
 
 mod pipeline;
-mod system_interface;
+pub mod system_interface;
 mod utils;
 
 use pipeline::{
@@ -917,7 +917,7 @@ mod tests {
             0,
             0,
             0b0_0000011110_0_00000000_00000_1101111, // JAL r0, 0x44
-            0,                                       // second jump returns here
+            0,                                       // second jump lands here
             0,
             0,
             0,
@@ -930,12 +930,13 @@ mod tests {
             0,
             0,
             0,
-            0,
-            0, // first jump lands here
+            0b000000000000_00001_000_00000_1100111, // JALR x0, 0
+            0,                                      // first jump lands here
             0,
             0,
             0,
             0b1_1111011100_1_11111111_00001_1101111, // JAL r1, 0xFFFDC
+            0,                                       // third jump returns here
         ]);
 
         for _ in 0..2 {
@@ -1011,6 +1012,51 @@ mod tests {
             InstructionValue {
                 pc: 0x1000_000C,
                 pc_plus_4: 0x1000_0010,
+                instruction: 0,
+            }
+        );
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
+
+        for _ in 0..12 {
+            run_instruction!(rv);
+        }
+
+        // JALR x0, 0
+        rv.cycle();
+        assert_eq!(
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                instruction: 0b000000000000_00001_000_00000_1100111,
+                pc: 0x1000_0040,
+                pc_plus_4: 0x1000_0044,
+            }
+        );
+        rv.cycle();
+        assert_eq!(
+            rv.stage_de.get_decoded_instruction_out(),
+            DecodedInstruction::Jal {
+                rd: 0b00000,
+                branch_address: 0x1000_0058,
+                pc: 0x1000_0040,
+                pc_plus_4: 0x1000_0044,
+            }
+        );
+        assert_eq!(rv.state, State::Execute);
+        rv.cycle();
+        rv.cycle();
+        rv.cycle();
+        assert_eq!(rv.state, State::Fetch);
+
+        rv.cycle();
+        assert_eq!(
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                pc: 0x1000_0058,
+                pc_plus_4: 0x1000_005C,
                 instruction: 0,
             }
         );

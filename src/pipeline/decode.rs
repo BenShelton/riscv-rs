@@ -148,9 +148,14 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                 let imm11_0 = ((instruction >> 20) & 0xFFF) as u16;
                 let i_imm = sign_extend_32(12, imm11_0 as i32);
                 let imm32 = slice_32(11, 1, i_imm as u32, 11);
+                let rs1_address = ((instruction >> 15) & 0x1F) as u8;
+                let rs1 = match rs1_address == 0 {
+                    true => 0,
+                    false => params.reg_file[rs1_address as usize],
+                };
                 self.instruction.set(DecodedInstruction::Jal {
                     rd: ((instruction >> 7) & 0x1F) as u8,
-                    branch_address: params.instruction_in.pc + imm32,
+                    branch_address: rs1 + imm32,
                     pc: params.instruction_in.pc,
                     pc_plus_4: params.instruction_in.pc_plus_4,
                 });
