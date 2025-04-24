@@ -15,6 +15,13 @@ const ALU_OPERATION_SR: u8 = 0b101;
 const ALU_OPERATION_OR: u8 = 0b110;
 const ALU_OPERATION_AND: u8 = 0b111;
 
+const BRANCH_OPERATION_EQ: u8 = 0b000;
+const BRANCH_OPERATION_NE: u8 = 0b001;
+const BRANCH_OPERATION_LT: u8 = 0b100;
+const BRANCH_OPERATION_GE: u8 = 0b101;
+const BRANCH_OPERATION_LTU: u8 = 0b110;
+const BRANCH_OPERATION_GEU: u8 = 0b111;
+
 pub struct InstructionExecute {
     write_back_value: LatchValue<u32>,
     instruction: LatchValue<DecodedInstruction>,
@@ -48,6 +55,7 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
         }
         let decoded = params.decoded_instruction_in;
         self.instruction.set(decoded);
+
         match decoded {
             DecodedInstruction::Alu {
                 opcode,
@@ -125,6 +133,35 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
                     }
                     _ => 0,
                 });
+            }
+            DecodedInstruction::Branch {
+                funct3,
+                pc,
+                pc_plus_4,
+                rs1,
+                rs2,
+                ..
+            } => {
+                let branch_taken = match funct3 {
+                    BRANCH_OPERATION_EQ => rs1 == rs2,
+                    BRANCH_OPERATION_NE => rs1 != rs2,
+                    BRANCH_OPERATION_LT => (rs1 as i32) < (rs2 as i32),
+                    BRANCH_OPERATION_GE => (rs1 as i32) >= (rs2 as i32),
+                    BRANCH_OPERATION_LTU => rs1 < rs2,
+                    BRANCH_OPERATION_GEU => rs1 >= rs2,
+                    _ => false,
+                };
+                if !branch_taken {
+                    self.instruction.set(DecodedInstruction::Branch {
+                        funct3,
+                        branch_address: pc_plus_4,
+                        pc,
+                        pc_plus_4,
+                        rs1,
+                        rs2,
+                    });
+                }
+                self.write_back_value.set(0);
             }
             _ => {
                 self.write_back_value.set(0);

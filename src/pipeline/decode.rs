@@ -39,6 +39,14 @@ pub enum DecodedInstruction {
         pc: u32,
         pc_plus_4: u32,
     },
+    Branch {
+        funct3: u8,
+        branch_address: u32,
+        pc: u32,
+        pc_plus_4: u32,
+        rs1: u32,
+        rs2: u32,
+    },
 }
 
 pub struct InstructionDecode {
@@ -158,6 +166,29 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                     branch_address: rs1 + imm32,
                     pc: params.instruction_in.pc,
                     pc_plus_4: params.instruction_in.pc_plus_4,
+                });
+            }
+            0b1100011 => {
+                let restructured_imm = bit(31, instruction, 12)
+                    | bit(7, instruction, 11)
+                    | slice_32(30, 25, instruction, 10)
+                    | slice_32(11, 8, instruction, 4);
+                let imm32 = sign_extend_32(13, (restructured_imm << 1) as i32);
+                let rs1_address = ((instruction >> 15) & 0x1F) as u8;
+                let rs2_address = ((instruction >> 20) & 0x1F) as u8;
+                self.instruction.set(DecodedInstruction::Branch {
+                    funct3: ((instruction >> 12) & 0x07) as u8,
+                    branch_address: params.instruction_in.pc.saturating_add_signed(imm32),
+                    pc: params.instruction_in.pc,
+                    pc_plus_4: params.instruction_in.pc_plus_4,
+                    rs1: match rs1_address == 0 {
+                        true => 0,
+                        false => params.reg_file[rs1_address as usize],
+                    },
+                    rs2: match rs2_address == 0 {
+                        true => 0,
+                        false => params.reg_file[rs2_address as usize],
+                    },
                 });
             }
             _ => {

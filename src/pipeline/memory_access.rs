@@ -110,6 +110,9 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
             DecodedInstruction::Jal { pc_plus_4, .. } => {
                 self.write_back_value.set(pc_plus_4);
             }
+            DecodedInstruction::Branch { .. } => {
+                self.write_back_value.set(0);
+            }
             DecodedInstruction::None => {
                 self.write_back_value.set(0);
             }

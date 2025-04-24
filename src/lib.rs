@@ -57,14 +57,9 @@ impl RV32ISystem {
     pub fn compute(&mut self) {
         self.stage_if.compute(InstructionFetchParams {
             should_stall: self.state != State::Fetch,
-            branch_address: match self.stage_de.get_decoded_instruction_out() {
-                DecodedInstruction::Jal { branch_address, .. } => {
-                    if self.state == State::Fetch {
-                        Some(branch_address)
-                    } else {
-                        None
-                    }
-                }
+            branch_address: match self.stage_ex.get_execution_value_out().instruction {
+                DecodedInstruction::Jal { branch_address, .. } => Some(branch_address),
+                DecodedInstruction::Branch { branch_address, .. } => Some(branch_address),
                 _ => None,
             },
             bus: &self.bus,
@@ -109,6 +104,10 @@ impl RV32ISystem {
             State::MemoryAccess => State::WriteBack,
             State::WriteBack => State::Fetch,
         };
+    }
+
+    pub fn current_line(&self) -> u32 {
+        self.stage_if.get_instruction_value_out().pc
     }
 }
 

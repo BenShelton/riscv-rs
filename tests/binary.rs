@@ -11,6 +11,14 @@ macro_rules! run_instruction {
     };
 }
 
+macro_rules! run_to_line {
+    ($rv:expr, $line:expr) => {
+        while $rv.current_line() != $line {
+            run_instruction!($rv);
+        }
+    };
+}
+
 fn load_binary(filename: &str) -> Vec<u32> {
     let root_dir = std::env::current_dir().expect("Failed to get current directory");
     let binaries_dir = root_dir.join("tests/binaries");
@@ -24,7 +32,7 @@ fn load_binary(filename: &str) -> Vec<u32> {
 
 #[test]
 fn test_binary_1() {
-    let instructions: Vec<u32> = load_binary("binary1.bin");
+    let instructions = load_binary("binary1.bin");
 
     let mut rv = RV32ISystem::new();
     rv.bus.rom.load(instructions);
@@ -133,8 +141,56 @@ fn test_binary_1() {
 
     // 10000070:    00e7a023    sw x14,0(x15)
     run_instruction!(rv);
-    assert_eq!(rv.bus.read_word(0x2000_0004), 0x0000_002C /* 42 */);
+    assert_eq!(rv.bus.read_word(0x2000_0004), 0x0000_002C);
 
     // 10000074:    0000006f    jal x0,10000074 <main+0x30>
     run_instruction!(rv);
+    assert_eq!(rv.current_line(), 0x1000_0074);
+    run_instruction!(rv);
+    assert_eq!(rv.current_line(), 0x1000_0074);
+    run_instruction!(rv);
+    assert_eq!(rv.current_line(), 0x1000_0074);
+}
+
+#[test]
+fn test_binary_2() {
+    let instructions = load_binary("binary2.bin");
+
+    let mut rv = RV32ISystem::new();
+    rv.bus.rom.load(instructions);
+
+    run_to_line!(rv, 0x1000_0034);
+    assert_eq!(rv.reg_file[14], 5);
+    assert_eq!(rv.reg_file[15], 8);
+
+    run_to_line!(rv, 0x1000_0084);
+    assert_eq!(rv.bus.read_word(0x2000_0000), 0x0000_002A /* 42 */);
+    assert_eq!(rv.bus.read_word(0x2000_0004), 0x0000_0001);
+}
+
+#[test]
+fn test_binary_3() {
+    let instructions = load_binary("binary3.bin");
+
+    let mut rv = RV32ISystem::new();
+    rv.bus.rom.load(instructions);
+
+    run_to_line!(rv, 0x1000_0038);
+    assert_eq!(rv.reg_file[15], 10);
+    run_instruction!(rv);
+    assert_eq!(rv.current_line(), 0x1000_0028);
+    assert_eq!(rv.reg_file[15], 10);
+
+    run_to_line!(rv, 0x1000_0038);
+    assert_eq!(rv.reg_file[15], 9);
+    run_instruction!(rv);
+    assert_eq!(rv.current_line(), 0x1000_0028);
+
+    run_to_line!(rv, 0x1000_0038);
+    assert_eq!(rv.reg_file[15], 8);
+    run_instruction!(rv);
+    assert_eq!(rv.current_line(), 0x1000_0028);
+
+    run_to_line!(rv, 0x1000_003C);
+    assert_eq!(rv.reg_file[15], 0);
 }
