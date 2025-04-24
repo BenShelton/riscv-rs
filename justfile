@@ -17,13 +17,17 @@ bootstrap:
 test:
   cargo nextest run --no-fail-fast
 
-# Compiles the `main.c` file in the `system_code` directory
+# Compiles the specified `.c` file in the `tests/binaries` directory
 [working-directory: 'system_code']
-@system-compile:
-    ../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -T link.ld -nostdlib bootloader.S main.c -o main
-    ../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .text main main.bin
+@binary-compile filename:
+    ../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -T link.ld -nostdlib bootloader.S ../tests/binaries/{{filename}}.c -o ../tests/binaries/{{filename}}.raw
+    ../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .text ../tests/binaries/{{filename}}.raw ../tests/binaries/{{filename}}.bin
 
-# Shows the disassembly of the compiled `main.c` binary
+alias bc := binary-compile
+
+# Shows disassembly of the specified `.c` file in the `tests/binaries` directory
 [working-directory: 'system_code']
-@system-dump: system-compile
-    ../xpacks/.bin/riscv-none-elf-objdump -d main -M no-aliases,numeric
+@binary-dump filename: (binary-compile filename)
+    ../xpacks/.bin/riscv-none-elf-objdump -d ../tests/binaries/{{filename}}.raw -M no-aliases,numeric
+
+alias bd := binary-dump

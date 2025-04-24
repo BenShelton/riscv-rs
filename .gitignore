@@ -1,4 +1,3 @@
-/system_code/main
-/system_code/main.bin
 /target
+/tests/binaries/*.raw
 /xpacks

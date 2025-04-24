@@ -22,4 +22,4 @@ To bootstrap the project:
 just bootstrap
 ```
 
-Run `just` to see all available commands.
+Run `just` to see all other available commands.
