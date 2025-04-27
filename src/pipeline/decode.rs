@@ -1,7 +1,7 @@
-use super::{LatchValue, PipelineStage, fetch::InstructionValue};
+use super::{PipelineStage, fetch::InstructionValue};
 use crate::{
     RegisterFile,
-    utils::{bit, sign_extend_32, slice_32},
+    utils::{LatchValue, bit, sign_extend_32, slice_32},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -46,6 +46,14 @@ pub enum DecodedInstruction {
         pc_plus_4: u32,
         rs1: u32,
         rs2: u32,
+    },
+    System {
+        funct3: u8,
+        csr_address: u32,
+        rd: u8,
+        source: u32,
+        should_write: bool,
+        should_read: bool,
     },
 }
 
@@ -189,6 +197,32 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                         true => 0,
                         false => params.reg_file[rs2_address as usize],
                     },
+                });
+            }
+            0b1110011 => {
+                let rd = ((instruction >> 7) & 0x1F) as u8;
+                let rs1_address = ((instruction >> 15) & 0x1F) as u8;
+                let funct3 = ((instruction >> 12) & 0x07) as u8;
+                let source = match funct3 & 0b100 {
+                    0b100 => rs1_address as u32,
+                    _ => params.reg_file[rs1_address as usize],
+                };
+                let should_write = match funct3 & 0b11 {
+                    0b01 => true,
+                    _ => rs1_address != 0,
+                };
+                let should_read = match funct3 & 0b11 {
+                    0b01 => rd != 0,
+                    _ => true,
+                };
+
+                self.instruction.set(DecodedInstruction::System {
+                    funct3,
+                    csr_address: instruction >> 20,
+                    rd,
+                    source,
+                    should_write,
+                    should_read,
                 });
             }
             _ => {

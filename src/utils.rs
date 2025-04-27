@@ -1,3 +1,36 @@
+#[derive(Default)]
+pub struct LatchValue<T>
+where
+    T: Clone,
+{
+    value: T,
+    next: T,
+}
+
+impl<T> LatchValue<T>
+where
+    T: Clone,
+{
+    pub fn new(value: T) -> Self {
+        LatchValue {
+            value: value.clone(),
+            next: value,
+        }
+    }
+
+    pub fn get(&self) -> &T {
+        &self.value
+    }
+
+    pub fn set(&mut self, value: T) {
+        self.next = value;
+    }
+
+    pub fn latch_next(&mut self) {
+        self.value = self.next.clone();
+    }
+}
+
 pub fn sign_extend_32(bits: u32, value: i32) -> i32 {
     let extend_bits = 32 - bits;
     (value << extend_bits) >> extend_bits

@@ -1,4 +1,6 @@
-use super::{LatchValue, PipelineStage, decode::DecodedInstruction};
+use crate::utils::LatchValue;
+
+use super::{PipelineStage, decode::DecodedInstruction};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExecutionValue {

@@ -1,10 +1,12 @@
 #![allow(dead_code)]
 #![allow(clippy::unusual_byte_groupings)]
 
+mod csr;
 mod pipeline;
 pub mod system_interface;
 mod utils;
 
+use csr::CSRInterface;
 use pipeline::{
     PipelineStage,
     decode::{DecodedInstruction, InstructionDecode, InstructionDecodeParams},
@@ -28,6 +30,7 @@ pub type RegisterFile = [u32; 32];
 
 pub struct RV32ISystem {
     pub bus: SystemInterface,
+    pub csr: CSRInterface,
     pub state: State,
     pub reg_file: RegisterFile,
     stage_if: InstructionFetch,
@@ -44,6 +47,7 @@ impl RV32ISystem {
 
         Self {
             bus: SystemInterface::new(rom, ram),
+            csr: CSRInterface::new(),
             state: State::Fetch,
             reg_file: [0u32; 32],
             stage_if: InstructionFetch::new(),
@@ -77,12 +81,14 @@ impl RV32ISystem {
             should_stall: self.state != State::MemoryAccess,
             execution_value_in: self.stage_ex.get_execution_value_out(),
             bus: &mut self.bus,
+            csr: &mut self.csr,
         });
         self.stage_wb.compute(InstructionWriteBackParams {
             should_stall: self.state != State::WriteBack,
             memory_access_value_in: self.stage_ma.get_memory_access_value_out(),
             reg_file: &mut self.reg_file,
         });
+        self.csr.compute();
     }
 
     pub fn latch_next(&mut self) {
@@ -102,8 +108,13 @@ impl RV32ISystem {
             State::Decode => State::Execute,
             State::Execute => State::MemoryAccess,
             State::MemoryAccess => State::WriteBack,
-            State::WriteBack => State::Fetch,
+            State::WriteBack => {
+                self.csr.instret.set(self.csr.instret.get() + 1);
+                State::Fetch
+            }
         };
+
+        self.csr.latch_next();
     }
 
     pub fn current_line(&self) -> u32 {

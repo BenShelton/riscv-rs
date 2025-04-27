@@ -194,3 +194,57 @@ fn test_binary_3() {
     run_to_line!(rv, 0x1000_003C);
     assert_eq!(rv.reg_file[15], 0);
 }
+
+#[test]
+fn test_binary_4() {
+    let instructions = load_binary("binary4.bin");
+
+    let mut rv = RV32ISystem::new();
+    rv.bus.rom.load(instructions);
+
+    run_instruction!(rv);
+    assert_eq!(*rv.csr.cycles.get(), 5);
+    assert_eq!(*rv.csr.instret.get(), 1);
+
+    run_to_line!(rv, 0x1000_0018);
+    assert_eq!(*rv.csr.cycles.get(), 35);
+    assert_eq!(*rv.csr.instret.get(), 7);
+    assert_eq!(rv.reg_file[15], 0);
+
+    run_instruction!(rv);
+    assert_eq!(*rv.csr.cycles.get(), 40);
+    assert_eq!(*rv.csr.instret.get(), 8);
+    assert_eq!(rv.reg_file[15], 7);
+
+    run_instruction!(rv);
+    assert_eq!(*rv.csr.cycles.get(), 45);
+    assert_eq!(*rv.csr.instret.get(), 9);
+    assert_eq!(rv.reg_file[15], 7);
+}
+
+#[test]
+fn test_binary_5() {
+    let instructions = load_binary("binary5.bin");
+
+    let mut rv = RV32ISystem::new();
+    rv.bus.rom.load(instructions);
+
+    run_instruction!(rv);
+    assert_eq!(*rv.csr.cycles.get(), 5);
+    assert_eq!(*rv.csr.instret.get(), 1);
+
+    run_to_line!(rv, 0x1000_0018);
+    assert_eq!(*rv.csr.cycles.get(), 35);
+    assert_eq!(*rv.csr.instret.get(), 7);
+    assert_eq!(rv.reg_file[15], 0);
+
+    run_instruction!(rv);
+    assert_eq!(*rv.csr.cycles.get(), 40);
+    assert_eq!(*rv.csr.instret.get(), 8);
+    assert_eq!(rv.reg_file[15], 38);
+
+    run_instruction!(rv);
+    assert_eq!(*rv.csr.cycles.get(), 45);
+    assert_eq!(*rv.csr.instret.get(), 9);
+    assert_eq!(rv.reg_file[15], 38);
+}

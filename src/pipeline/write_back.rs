@@ -41,6 +41,9 @@ impl<'a> PipelineStage<InstructionWriteBackParams<'a>> for InstructionWriteBack 
             DecodedInstruction::Branch { .. } => {
                 // Branch operations do not write back to the register file
             }
+            DecodedInstruction::System { rd, .. } => {
+                params.reg_file[rd as usize] = memory_access_value.write_back_value;
+            }
             DecodedInstruction::None => {}
         }
     }

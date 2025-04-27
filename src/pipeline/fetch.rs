@@ -1,5 +1,8 @@
-use super::{LatchValue, PipelineStage};
-use crate::system_interface::{MMIODevice, PROGRAM_ROM_START, SystemInterface};
+use super::PipelineStage;
+use crate::{
+    system_interface::{MMIODevice, PROGRAM_ROM_START, SystemInterface},
+    utils::LatchValue,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InstructionValue {

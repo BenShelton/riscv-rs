@@ -1,9 +1,10 @@
 use crate::{
+    csr::{CSR_OPERATION_RC, CSR_OPERATION_RS, CSR_OPERATION_RW, CSRInterface},
     system_interface::{MMIODevice, SystemInterface},
-    utils::sign_extend_32,
+    utils::{LatchValue, sign_extend_32},
 };
 
-use super::{LatchValue, PipelineStage, decode::DecodedInstruction, execute::ExecutionValue};
+use super::{PipelineStage, decode::DecodedInstruction, execute::ExecutionValue};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct MemoryAccessValue {
@@ -24,6 +25,7 @@ pub struct InstructionMemoryAccessParams<'a> {
     pub should_stall: bool,
     pub execution_value_in: ExecutionValue,
     pub bus: &'a mut SystemInterface,
+    pub csr: &'a mut CSRInterface,
 }
 
 impl InstructionMemoryAccess {
@@ -112,6 +114,34 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
             }
             DecodedInstruction::Branch { .. } => {
                 self.write_back_value.set(0);
+            }
+            DecodedInstruction::System {
+                funct3,
+                csr_address,
+                source,
+                should_write,
+                should_read,
+                ..
+            } => {
+                let csr_value = should_read
+                    .then(|| params.csr.read(csr_address))
+                    .unwrap_or(0);
+                self.write_back_value.set(csr_value);
+
+                if should_write {
+                    match funct3 & 0b11 {
+                        CSR_OPERATION_RW => {
+                            params.csr.write(csr_address, source);
+                        }
+                        CSR_OPERATION_RS => {
+                            params.csr.write(csr_address, csr_value | source);
+                        }
+                        CSR_OPERATION_RC => {
+                            params.csr.write(csr_address, csr_value & !source);
+                        }
+                        _ => {}
+                    }
+                }
             }
             DecodedInstruction::None => {
                 self.write_back_value.set(0);
