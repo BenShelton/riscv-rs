@@ -55,6 +55,11 @@ pub enum DecodedInstruction {
         should_write: bool,
         should_read: bool,
     },
+    Auipc {
+        pc: u32,
+        rd: u8,
+        imm32: u32,
+    },
 }
 
 pub struct InstructionDecode {
@@ -223,6 +228,13 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                     source,
                     should_write,
                     should_read,
+                });
+            }
+            0b0010111 => {
+                self.instruction.set(DecodedInstruction::Auipc {
+                    pc: params.instruction_in.pc,
+                    rd: ((instruction >> 7) & 0x1F) as u8,
+                    imm32: (instruction >> 12) << 12,
                 });
             }
             _ => {
