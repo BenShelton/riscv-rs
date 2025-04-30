@@ -36,14 +36,10 @@ pub enum DecodedInstruction {
     Jal {
         rd: u8,
         branch_address: u32,
-        pc: u32,
-        pc_plus_4: u32,
     },
     Branch {
         funct3: u8,
         branch_address: u32,
-        pc: u32,
-        pc_plus_4: u32,
         rs1: u32,
         rs2: u32,
     },
@@ -56,14 +52,22 @@ pub enum DecodedInstruction {
         should_read: bool,
     },
     Auipc {
-        pc: u32,
         rd: u8,
         imm32: u32,
     },
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct DecodedValue {
+    pub instruction: DecodedInstruction,
+    pub pc: u32,
+    pub pc_plus_4: u32,
+}
+
 pub struct InstructionDecode {
     instruction: LatchValue<DecodedInstruction>,
+    pc: LatchValue<u32>,
+    pc_plus_4: LatchValue<u32>,
 }
 
 pub struct InstructionDecodeParams<'a> {
@@ -76,11 +80,17 @@ impl InstructionDecode {
     pub fn new() -> Self {
         Self {
             instruction: LatchValue::new(DecodedInstruction::None),
+            pc: LatchValue::new(0),
+            pc_plus_4: LatchValue::new(0),
         }
     }
 
-    pub fn get_decoded_instruction_out(&self) -> DecodedInstruction {
-        *self.instruction.get()
+    pub fn get_decoded_instruction_out(&self) -> DecodedValue {
+        DecodedValue {
+            instruction: *self.instruction.get(),
+            pc: *self.pc.get(),
+            pc_plus_4: *self.pc_plus_4.get(),
+        }
     }
 }
 
@@ -90,6 +100,8 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
             return;
         }
         let instruction = params.instruction_in.instruction;
+        self.pc.set(params.instruction_in.pc);
+        self.pc_plus_4.set(params.instruction_in.pc_plus_4);
 
         let opcode = (instruction & 0x7F) as u8;
         match opcode {
@@ -161,8 +173,6 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                 self.instruction.set(DecodedInstruction::Jal {
                     rd: ((instruction >> 7) & 0x1F) as u8,
                     branch_address: params.instruction_in.pc.saturating_add_signed(imm32),
-                    pc: params.instruction_in.pc,
-                    pc_plus_4: params.instruction_in.pc_plus_4,
                 });
             }
             0b1100111 => {
@@ -177,8 +187,6 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                 self.instruction.set(DecodedInstruction::Jal {
                     rd: ((instruction >> 7) & 0x1F) as u8,
                     branch_address: rs1 + imm32,
-                    pc: params.instruction_in.pc,
-                    pc_plus_4: params.instruction_in.pc_plus_4,
                 });
             }
             0b1100011 => {
@@ -192,8 +200,6 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                 self.instruction.set(DecodedInstruction::Branch {
                     funct3: ((instruction >> 12) & 0x07) as u8,
                     branch_address: params.instruction_in.pc.saturating_add_signed(imm32),
-                    pc: params.instruction_in.pc,
-                    pc_plus_4: params.instruction_in.pc_plus_4,
                     rs1: match rs1_address == 0 {
                         true => 0,
                         false => params.reg_file[rs1_address as usize],
@@ -232,7 +238,6 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
             }
             0b0010111 => {
                 self.instruction.set(DecodedInstruction::Auipc {
-                    pc: params.instruction_in.pc,
                     rd: ((instruction >> 7) & 0x1F) as u8,
                     imm32: (instruction >> 12) << 12,
                 });
@@ -245,5 +250,7 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
 
     fn latch_next(&mut self) {
         self.instruction.latch_next();
+        self.pc.latch_next();
+        self.pc_plus_4.latch_next();
     }
 }

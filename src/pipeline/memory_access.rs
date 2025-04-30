@@ -9,6 +9,8 @@ use super::{PipelineStage, decode::DecodedInstruction, execute::ExecutionValue};
 #[derive(Debug, PartialEq, Eq)]
 pub struct MemoryAccessValue {
     pub write_back_value: u32,
+    pub pc: u32,
+    pub pc_plus_4: u32,
     pub instruction: DecodedInstruction,
 }
 
@@ -18,6 +20,8 @@ const WIDTH_WORD: u8 = 0b010;
 
 pub struct InstructionMemoryAccess {
     write_back_value: LatchValue<u32>,
+    pc: LatchValue<u32>,
+    pc_plus_4: LatchValue<u32>,
     instruction: LatchValue<DecodedInstruction>,
 }
 
@@ -32,6 +36,8 @@ impl InstructionMemoryAccess {
     pub fn new() -> Self {
         Self {
             write_back_value: LatchValue::new(0),
+            pc: LatchValue::new(0),
+            pc_plus_4: LatchValue::new(0),
             instruction: LatchValue::new(DecodedInstruction::None),
         }
     }
@@ -40,6 +46,8 @@ impl InstructionMemoryAccess {
         MemoryAccessValue {
             write_back_value: *self.write_back_value.get(),
             instruction: *self.instruction.get(),
+            pc: *self.pc.get(),
+            pc_plus_4: *self.pc_plus_4.get(),
         }
     }
 }
@@ -51,6 +59,8 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
         }
         let execution_value = params.execution_value_in;
         self.instruction.set(execution_value.instruction);
+        self.pc.set(execution_value.pc);
+        self.pc_plus_4.set(execution_value.pc_plus_4);
 
         match execution_value.instruction {
             DecodedInstruction::Alu { .. } => {
@@ -109,8 +119,8 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
             DecodedInstruction::Lui { imm32, .. } => {
                 self.write_back_value.set(imm32);
             }
-            DecodedInstruction::Jal { pc_plus_4, .. } => {
-                self.write_back_value.set(pc_plus_4);
+            DecodedInstruction::Jal { .. } => {
+                self.write_back_value.set(execution_value.pc_plus_4);
             }
             DecodedInstruction::Branch { .. } => {
                 self.write_back_value.set(0);
@@ -143,8 +153,8 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                     }
                 }
             }
-            DecodedInstruction::Auipc { pc, imm32, .. } => {
-                self.write_back_value.set(pc + imm32);
+            DecodedInstruction::Auipc { imm32, .. } => {
+                self.write_back_value.set(execution_value.pc + imm32);
             }
             DecodedInstruction::None => {
                 self.write_back_value.set(0);
@@ -155,5 +165,7 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
     fn latch_next(&mut self) {
         self.write_back_value.latch_next();
         self.instruction.latch_next();
+        self.pc.latch_next();
+        self.pc_plus_4.latch_next();
     }
 }

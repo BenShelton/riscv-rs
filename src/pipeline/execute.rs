@@ -1,11 +1,16 @@
 use crate::utils::LatchValue;
 
-use super::{PipelineStage, decode::DecodedInstruction};
+use super::{
+    PipelineStage,
+    decode::{DecodedInstruction, DecodedValue},
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExecutionValue {
     pub write_back_value: u32,
     pub instruction: DecodedInstruction,
+    pub pc: u32,
+    pub pc_plus_4: u32,
 }
 
 const ALU_OPERATION_ADD: u8 = 0b000;
@@ -27,11 +32,13 @@ const BRANCH_OPERATION_GEU: u8 = 0b111;
 pub struct InstructionExecute {
     write_back_value: LatchValue<u32>,
     instruction: LatchValue<DecodedInstruction>,
+    pc: LatchValue<u32>,
+    pc_plus_4: LatchValue<u32>,
 }
 
 pub struct InstructionExecuteParams {
     pub should_stall: bool,
-    pub decoded_instruction_in: DecodedInstruction,
+    pub decoded_instruction_in: DecodedValue,
 }
 
 impl InstructionExecute {
@@ -39,6 +46,8 @@ impl InstructionExecute {
         Self {
             write_back_value: LatchValue::new(0),
             instruction: LatchValue::new(DecodedInstruction::None),
+            pc: LatchValue::new(0),
+            pc_plus_4: LatchValue::new(0),
         }
     }
 
@@ -46,6 +55,8 @@ impl InstructionExecute {
         ExecutionValue {
             write_back_value: *self.write_back_value.get(),
             instruction: *self.instruction.get(),
+            pc: *self.pc.get(),
+            pc_plus_4: *self.pc_plus_4.get(),
         }
     }
 }
@@ -56,9 +67,11 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
             return;
         }
         let decoded = params.decoded_instruction_in;
-        self.instruction.set(decoded);
+        self.instruction.set(decoded.instruction);
+        self.pc.set(decoded.pc);
+        self.pc_plus_4.set(decoded.pc_plus_4);
 
-        match decoded {
+        match decoded.instruction {
             DecodedInstruction::Alu {
                 opcode,
                 funct3,
@@ -137,12 +150,7 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
                 });
             }
             DecodedInstruction::Branch {
-                funct3,
-                pc,
-                pc_plus_4,
-                rs1,
-                rs2,
-                ..
+                funct3, rs1, rs2, ..
             } => {
                 let branch_taken = match funct3 {
                     BRANCH_OPERATION_EQ => rs1 == rs2,
@@ -156,9 +164,7 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
                 if !branch_taken {
                     self.instruction.set(DecodedInstruction::Branch {
                         funct3,
-                        branch_address: pc_plus_4,
-                        pc,
-                        pc_plus_4,
+                        branch_address: decoded.pc_plus_4,
                         rs1,
                         rs2,
                     });
@@ -174,5 +180,7 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
     fn latch_next(&mut self) {
         self.write_back_value.latch_next();
         self.instruction.latch_next();
+        self.pc.latch_next();
+        self.pc_plus_4.latch_next();
     }
 }
