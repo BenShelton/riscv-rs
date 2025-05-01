@@ -21,17 +21,41 @@ test:
 bench:
   cargo bench
 
-# Compiles the specified `.c` file in the `tests/binaries` directory
-[working-directory: 'system_code']
-@binary-compile filename:
-    ../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -T link.ld -nostdlib bootloader.S ../tests/binaries/{{filename}}.c -o ../tests/binaries/{{filename}}.raw
-    ../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .text ../tests/binaries/{{filename}}.raw ../tests/binaries/{{filename}}.bin
+# Cleans all binary artifacts
+binary-clean:
+    rm -rf ./system_code/v1/build
+    rm -rf ./system_code/v2/build
 
-alias bc := binary-compile
+# Compiles the specified `.c` file in the `tests/binaries` directory, version 1
+[working-directory: 'system_code/v1']
+@binary-compile-1 filename:
+    mkdir -p build
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -T link.ld -nostdlib bootloader.S ../../tests/binaries/{{filename}}.c -o build/{{filename}}.elf
+    ../../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .text build/{{filename}}.elf ../../tests/binaries/{{filename}}.bin
 
-# Shows disassembly of the specified `.c` file in the `tests/binaries` directory
-[working-directory: 'system_code']
-@binary-dump filename: (binary-compile filename)
-    ../xpacks/.bin/riscv-none-elf-objdump -d ../tests/binaries/{{filename}}.raw -M no-aliases,numeric
+# Compiles the specified `.c` file in the `tests/binaries` directory, version 2
+[working-directory: 'system_code/v2']
+@binary-compile-2 filename:
+    mkdir -p build
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -I inc -c -ffreestanding -nostdlib src/boot.c -o build/boot.o
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -I inc -c -ffreestanding -nostdlib src/bootloader.S -o build/bootloader.o
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -I inc -c -ffreestanding -nostdlib src/isr.c -o build/isr.o
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -I inc -c -ffreestanding -nostdlib ../../tests/binaries/{{filename}}.c -o build/{{filename}}.o
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -T link.ld -ffreestanding -nostdlib build/*.o -o build/{{filename}}.elf
+    ../../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .text build/{{filename}}.elf build/{{filename}}.code
+    ../../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .data build/{{filename}}.elf build/{{filename}}.data
+    cat build/{{filename}}.code build/{{filename}}.data > ../../tests/binaries/{{filename}}.bin
 
-alias bd := binary-dump
+
+# Shows disassembly of the specified `.c` file in the `tests/binaries` directory, version 1
+[working-directory: 'system_code/v1']
+@binary-dump-1 filename: (binary-compile-1 filename)
+    ../../xpacks/.bin/riscv-none-elf-objdump -d build/{{filename}}.elf -M no-aliases,numeric
+
+# Shows disassembly of the specified `.c` file in the `tests/binaries` directory, version 2
+[working-directory: 'system_code/v2']
+@binary-dump-2 filename: (binary-compile-2 filename)
+    ../../xpacks/.bin/riscv-none-elf-objdump -d build/{{filename}}.elf -M no-aliases,numeric
+
+alias bc := binary-compile-2
+alias bd := binary-dump-2
