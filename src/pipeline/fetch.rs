@@ -50,7 +50,8 @@ impl<'a> PipelineStage<InstructionFetchParams<'a>> for InstructionFetch {
             Some(branch_address) => branch_address,
             None => *self.pc_plus_4.get(),
         };
-        self.instruction.set(params.bus.read_word(next_address));
+        self.instruction
+            .set(params.bus.read_word(next_address).unwrap());
         self.pc.set(next_address);
         self.pc_plus_4.set(next_address.wrapping_add(4));
     }

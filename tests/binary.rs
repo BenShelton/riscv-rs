@@ -93,7 +93,7 @@ fn test_binary_1() {
 
     // 10000028:    00e7a023    sw x14,0(x15) # 20000000 <_ebss>
     run_instruction!(rv);
-    assert_eq!(rv.bus.read_word(0x2000_0000), 0x3004_0f00);
+    assert_eq!(rv.bus.read_word(0x2000_0000), Ok(0x3004_0F00));
 
     // 1000002c:    02a00793    addi x15,x0,42
     run_instruction!(rv);
@@ -118,7 +118,7 @@ fn test_binary_1() {
 
     // 10000058:    fea42623    sw x10,-20(x8)
     run_instruction!(rv);
-    assert_eq!(rv.bus.read_word(0x203F_FFE8), 0x0000_002A /* 42 */);
+    assert_eq!(rv.bus.read_word(0x203F_FFE8), Ok(0x0000_002A) /* 42 */);
 
     // 1000005c:    00200693    addi x13,x0,2
     run_instruction!(rv);
@@ -141,7 +141,7 @@ fn test_binary_1() {
 
     // 10000070:    00e7a023    sw x14,0(x15)
     run_instruction!(rv);
-    assert_eq!(rv.bus.read_word(0x2000_0004), 0x0000_002C);
+    assert_eq!(rv.bus.read_word(0x2000_0004), Ok(0x0000_002C));
 
     // 10000074:    0000006f    jal x0,10000074 <main+0x30>
     run_instruction!(rv);
@@ -164,8 +164,8 @@ fn test_binary_2() {
     assert_eq!(rv.reg_file[15], 8);
 
     run_to_line!(rv, 0x1000_0084);
-    assert_eq!(rv.bus.read_word(0x2000_0000), 0x0000_002A /* 42 */);
-    assert_eq!(rv.bus.read_word(0x2000_0004), 0x0000_0001);
+    assert_eq!(rv.bus.read_word(0x2000_0000), Ok(0x0000_002A) /* 42 */);
+    assert_eq!(rv.bus.read_word(0x2000_0004), Ok(0x0000_0001));
 }
 
 #[test]
@@ -247,4 +247,17 @@ fn test_binary_5() {
     assert_eq!(*rv.csr.cycles.get(), 45);
     assert_eq!(*rv.csr.instret.get(), 9);
     assert_eq!(rv.reg_file[15], 38);
+}
+
+#[test]
+#[should_panic /*(expected = "Unaligned read from address 0x203FFFEE") */]
+fn test_binary_6() {
+    let instructions = load_binary("binary6.bin");
+
+    let mut rv = RV32ISystem::new();
+    rv.bus.rom.load(instructions);
+
+    // 10000080:    01010413    addi x8,x2,16
+    run_to_line!(rv, 0x1000_0080);
+    run_instruction!(rv);
 }

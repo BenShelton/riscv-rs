@@ -73,7 +73,7 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                 let should_sign_extend = funct3 & 0b100 == 0;
                 self.write_back_value.set(match funct3 & 0b011 {
                     WIDTH_BYTE => {
-                        let v = params.bus.read_byte(addr);
+                        let v = params.bus.read_byte(addr).unwrap();
                         if should_sign_extend {
                             sign_extend_32(8, v as i32) as u32
                         } else {
@@ -81,14 +81,14 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                         }
                     }
                     WIDTH_HALF => {
-                        let v = params.bus.read_half_word(addr);
+                        let v = params.bus.read_half_word(addr).unwrap();
                         if should_sign_extend {
                             sign_extend_32(16, v as i32) as u32
                         } else {
                             v as u32
                         }
                     }
-                    WIDTH_WORD => params.bus.read_word(addr),
+                    WIDTH_WORD => params.bus.read_word(addr).unwrap(),
                     _ => {
                         panic!("Invalid funct3 for load operation");
                     }
@@ -103,13 +103,13 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                 let addr = (imm32 + rs1 as i32) as u32;
                 match funct3 {
                     WIDTH_BYTE => {
-                        params.bus.write_byte(addr, rs2 as u8);
+                        params.bus.write_byte(addr, rs2 as u8).unwrap();
                     }
                     WIDTH_HALF => {
-                        params.bus.write_half_word(addr, rs2 as u16);
+                        params.bus.write_half_word(addr, rs2 as u16).unwrap();
                     }
                     WIDTH_WORD => {
-                        params.bus.write_word(addr, rs2);
+                        params.bus.write_word(addr, rs2).unwrap();
                     }
                     _ => {
                         panic!("Invalid funct3 for store operation");
