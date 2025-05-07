@@ -78,6 +78,10 @@ impl TrapInterface {
         self.state.set(TrapState::SetCSRLoadJump);
     }
 
+    pub fn trap_return(&mut self) {
+        self.state.set(TrapState::ReturnFromTrap);
+    }
+
     pub fn compute(&mut self, params: TrapParams) {
         if params.should_stall {
             return;
@@ -104,7 +108,10 @@ impl TrapInterface {
                 (params.return_to_pipeline_mode)();
                 self.state.set(TrapState::Idle);
             }
-            TrapState::ReturnFromTrap => {}
+            TrapState::ReturnFromTrap => {
+                self.pc_to_set.set(params.csr.mepc);
+                self.state.set(TrapState::SetPc);
+            }
         }
     }
 

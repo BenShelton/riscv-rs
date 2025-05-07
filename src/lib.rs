@@ -83,6 +83,10 @@ impl RV32ISystem {
             should_stall: current_state != CPUState::Pipeline(PipelineState::Decode),
             instruction_in: self.stage_if.get_instruction_value_out(),
             reg_file: &mut self.reg_file,
+            trap_return: Box::new(|| {
+                self.trap.trap_return();
+                self.state = CPUState::Trap;
+            }),
         });
         self.stage_ex.compute(InstructionExecuteParams {
             should_stall: current_state != CPUState::Pipeline(PipelineState::Execute),

@@ -294,4 +294,16 @@ fn test_binary_6() {
     assert_eq!(rv.reg_file[2], 0x203F_FFEC);
     assert_eq!(rv.reg_file[14], 0x2000_0000);
     assert_eq!(rv.reg_file[15], 0x2000_0000);
+
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Trap);
+    assert_eq!(rv.trap.state.get(), &TrapState::ReturnFromTrap);
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Trap);
+    assert_eq!(rv.trap.state.get(), &TrapState::SetPc);
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+    assert_eq!(rv.current_line(), 0x1000_0088);
 }

@@ -76,6 +76,7 @@ pub struct InstructionDecodeParams<'a> {
     pub should_stall: bool,
     pub instruction_in: InstructionValue,
     pub reg_file: &'a mut RegisterFile,
+    pub trap_return: Box<dyn FnOnce() + 'a>,
 }
 
 impl InstructionDecode {
@@ -219,6 +220,13 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                 let rd = ((instruction >> 7) & 0x1F) as u8;
                 let rs1_address = ((instruction >> 15) & 0x1F) as u8;
                 let funct3 = ((instruction >> 12) & 0x07) as u8;
+                let imm11_0 = instruction >> 20;
+
+                if rd == 0 && rs1_address == 0 && imm11_0 == 0x302 {
+                    (params.trap_return)();
+                    return;
+                }
+
                 let source = match funct3 & 0b100 {
                     0b100 => rs1_address as u32,
                     _ => params.reg_file[rs1_address as usize],
@@ -234,7 +242,7 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
 
                 self.instruction.set(DecodedInstruction::System {
                     funct3,
-                    csr_address: instruction >> 20,
+                    csr_address: imm11_0,
                     rd,
                     source,
                     should_write,
