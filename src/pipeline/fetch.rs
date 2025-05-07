@@ -8,13 +8,13 @@ use crate::{
 pub struct InstructionValue {
     pub pc: u32,
     pub pc_plus_4: u32,
-    pub instruction: u32,
+    pub raw_instruction: u32,
 }
 
 pub struct InstructionFetch {
-    pc: LatchValue<u32>,
-    pc_plus_4: LatchValue<u32>,
-    instruction: LatchValue<u32>,
+    pub pc: LatchValue<u32>,
+    pub pc_plus_4: LatchValue<u32>,
+    raw_instruction: LatchValue<u32>,
 }
 
 pub struct InstructionFetchParams<'a> {
@@ -28,7 +28,7 @@ impl InstructionFetch {
         Self {
             pc: LatchValue::new(PROGRAM_ROM_START),
             pc_plus_4: LatchValue::new(PROGRAM_ROM_START),
-            instruction: LatchValue::new(0x0000_0000),
+            raw_instruction: LatchValue::new(0x0000_0000),
         }
     }
 
@@ -36,7 +36,7 @@ impl InstructionFetch {
         InstructionValue {
             pc: *self.pc.get(),
             pc_plus_4: *self.pc_plus_4.get(),
-            instruction: *self.instruction.get(),
+            raw_instruction: *self.raw_instruction.get(),
         }
     }
 }
@@ -50,14 +50,19 @@ impl<'a> PipelineStage<InstructionFetchParams<'a>> for InstructionFetch {
             Some(branch_address) => branch_address,
             None => *self.pc_plus_4.get(),
         };
-        self.instruction
-            .set(params.bus.read_word(next_address).unwrap());
+        let value = match params.bus.read_word(next_address) {
+            Ok(instruction) => instruction,
+            Err(e) => {
+                panic!("{}", e);
+            }
+        };
+        self.raw_instruction.set(value);
         self.pc.set(next_address);
         self.pc_plus_4.set(next_address.wrapping_add(4));
     }
 
     fn latch_next(&mut self) {
-        self.instruction.latch_next();
+        self.raw_instruction.latch_next();
         self.pc.latch_next();
         self.pc_plus_4.latch_next();
     }

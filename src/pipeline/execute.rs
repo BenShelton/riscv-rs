@@ -9,6 +9,7 @@ use super::{
 pub struct ExecutionValue {
     pub write_back_value: u32,
     pub instruction: DecodedInstruction,
+    pub raw_instruction: u32,
     pub pc: u32,
     pub pc_plus_4: u32,
 }
@@ -32,6 +33,7 @@ const BRANCH_OPERATION_GEU: u8 = 0b111;
 pub struct InstructionExecute {
     write_back_value: LatchValue<u32>,
     instruction: LatchValue<DecodedInstruction>,
+    raw_instruction: LatchValue<u32>,
     pc: LatchValue<u32>,
     pc_plus_4: LatchValue<u32>,
 }
@@ -46,6 +48,7 @@ impl InstructionExecute {
         Self {
             write_back_value: LatchValue::new(0),
             instruction: LatchValue::new(DecodedInstruction::None),
+            raw_instruction: LatchValue::new(0),
             pc: LatchValue::new(0),
             pc_plus_4: LatchValue::new(0),
         }
@@ -55,6 +58,7 @@ impl InstructionExecute {
         ExecutionValue {
             write_back_value: *self.write_back_value.get(),
             instruction: *self.instruction.get(),
+            raw_instruction: *self.raw_instruction.get(),
             pc: *self.pc.get(),
             pc_plus_4: *self.pc_plus_4.get(),
         }
@@ -68,6 +72,7 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
         }
         let decoded = params.decoded_instruction_in;
         self.instruction.set(decoded.instruction);
+        self.raw_instruction.set(decoded.raw_instruction);
         self.pc.set(decoded.pc);
         self.pc_plus_4.set(decoded.pc_plus_4);
 
@@ -180,6 +185,7 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
     fn latch_next(&mut self) {
         self.write_back_value.latch_next();
         self.instruction.latch_next();
+        self.raw_instruction.latch_next();
         self.pc.latch_next();
         self.pc_plus_4.latch_next();
     }

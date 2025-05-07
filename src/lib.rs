@@ -4,6 +4,7 @@
 mod csr;
 mod pipeline;
 pub mod system_interface;
+pub mod trap;
 mod utils;
 
 use csr::CSRInterface;
@@ -16,9 +17,16 @@ use pipeline::{
     write_back::{InstructionWriteBack, InstructionWriteBackParams},
 };
 use system_interface::{RamDevice, RomDevice, SystemInterface};
+use trap::{TrapInterface, TrapParams};
 
-#[derive(PartialEq, Eq, Debug)]
-pub enum State {
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub enum CPUState {
+    Pipeline(PipelineState),
+    Trap,
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub enum PipelineState {
     Fetch,
     Decode,
     Execute,
@@ -31,7 +39,8 @@ pub type RegisterFile = [u32; 32];
 pub struct RV32ISystem {
     pub bus: SystemInterface,
     pub csr: CSRInterface,
-    pub state: State,
+    pub trap: TrapInterface,
+    pub state: CPUState,
     pub reg_file: RegisterFile,
     stage_if: InstructionFetch,
     stage_de: InstructionDecode,
@@ -48,7 +57,8 @@ impl RV32ISystem {
         Self {
             bus: SystemInterface::new(rom, ram),
             csr: CSRInterface::new(),
-            state: State::Fetch,
+            trap: TrapInterface::new(),
+            state: CPUState::Pipeline(PipelineState::Fetch),
             reg_file: [0u32; 32],
             stage_if: InstructionFetch::new(),
             stage_de: InstructionDecode::new(),
@@ -59,8 +69,9 @@ impl RV32ISystem {
     }
 
     pub fn compute(&mut self) {
+        let current_state = self.state;
         self.stage_if.compute(InstructionFetchParams {
-            should_stall: self.state != State::Fetch,
+            should_stall: current_state != CPUState::Pipeline(PipelineState::Fetch),
             branch_address: match self.stage_ex.get_execution_value_out().instruction {
                 DecodedInstruction::Jal { branch_address, .. } => Some(branch_address),
                 DecodedInstruction::Branch { branch_address, .. } => Some(branch_address),
@@ -69,26 +80,42 @@ impl RV32ISystem {
             bus: &self.bus,
         });
         self.stage_de.compute(InstructionDecodeParams {
-            should_stall: self.state != State::Decode,
+            should_stall: current_state != CPUState::Pipeline(PipelineState::Decode),
             instruction_in: self.stage_if.get_instruction_value_out(),
             reg_file: &mut self.reg_file,
         });
         self.stage_ex.compute(InstructionExecuteParams {
-            should_stall: self.state != State::Execute,
+            should_stall: current_state != CPUState::Pipeline(PipelineState::Execute),
             decoded_instruction_in: self.stage_de.get_decoded_instruction_out(),
         });
         self.stage_ma.compute(InstructionMemoryAccessParams {
-            should_stall: self.state != State::MemoryAccess,
+            should_stall: current_state != CPUState::Pipeline(PipelineState::MemoryAccess),
             execution_value_in: self.stage_ex.get_execution_value_out(),
             bus: &mut self.bus,
             csr: &mut self.csr,
+            trap: Box::new(|mepc: u32, mcause: u32, mtval: u32| {
+                self.trap.trap_exception(mepc, mcause, mtval);
+                self.state = CPUState::Trap;
+            }),
         });
         self.stage_wb.compute(InstructionWriteBackParams {
-            should_stall: self.state != State::WriteBack,
+            should_stall: current_state != CPUState::Pipeline(PipelineState::WriteBack),
             memory_access_value_in: self.stage_ma.get_memory_access_value_out(),
             reg_file: &mut self.reg_file,
         });
         self.csr.compute();
+        self.trap.compute(TrapParams {
+            should_stall: current_state != CPUState::Trap,
+            csr: &mut self.csr,
+            bus: &mut self.bus,
+            set_pc: Box::new(|pc| {
+                self.stage_if.pc.set(pc);
+                self.stage_if.pc_plus_4.set(pc);
+            }),
+            return_to_pipeline_mode: Box::new(|| {
+                self.state = CPUState::Pipeline(PipelineState::Fetch);
+            }),
+        });
     }
 
     pub fn latch_next(&mut self) {
@@ -97,21 +124,34 @@ impl RV32ISystem {
         self.stage_ex.latch_next();
         self.stage_ma.latch_next();
         self.stage_wb.latch_next();
+        self.trap.latch_next();
     }
 
     pub fn cycle(&mut self) {
+        let current_state = self.state;
         self.compute();
         self.latch_next();
 
-        self.state = match self.state {
-            State::Fetch => State::Decode,
-            State::Decode => State::Execute,
-            State::Execute => State::MemoryAccess,
-            State::MemoryAccess => State::WriteBack,
-            State::WriteBack => {
-                self.csr.instret.set(self.csr.instret.get() + 1);
-                State::Fetch
-            }
+        if self.state != CPUState::Trap {
+            self.state = match current_state {
+                CPUState::Pipeline(PipelineState::Fetch) => {
+                    CPUState::Pipeline(PipelineState::Decode)
+                }
+                CPUState::Pipeline(PipelineState::Decode) => {
+                    CPUState::Pipeline(PipelineState::Execute)
+                }
+                CPUState::Pipeline(PipelineState::Execute) => {
+                    CPUState::Pipeline(PipelineState::MemoryAccess)
+                }
+                CPUState::Pipeline(PipelineState::MemoryAccess) => {
+                    CPUState::Pipeline(PipelineState::WriteBack)
+                }
+                CPUState::Pipeline(PipelineState::WriteBack) => {
+                    self.csr.instret.set(self.csr.instret.get() + 1);
+                    CPUState::Pipeline(PipelineState::Fetch)
+                }
+                _ => self.state,
+            };
         };
 
         self.csr.latch_next();
@@ -148,7 +188,7 @@ mod tests {
             $rv.cycle();
             $rv.cycle();
             $rv.cycle();
-            assert_eq!($rv.state, State::Fetch);
+            assert_eq!($rv.state, CPUState::Pipeline(PipelineState::Fetch));
         };
     }
 
@@ -189,17 +229,23 @@ mod tests {
     }
 
     #[test]
-    #[should_panic/* (expected = "Unaligned read from address 0x10000005") */]
-    fn test_panic_on_misaligned_read() {
+    fn test_error_on_misaligned_read() {
         let rv = RV32ISystem::new();
-        rv.bus.read_word(0x1000_0005).unwrap();
+        assert_eq!(
+            rv.bus.read_word(0x1000_0005).map_err(|e| format!("{}", e)),
+            Err("Unaligned read from address 0x10000005".to_string())
+        );
     }
 
     #[test]
-    #[should_panic/* (expected = "Unaligned write to address 0x10000005 (value=0xDEADBEEF)") */]
-    fn test_panic_on_misaligned_write() {
+    fn test_error_on_misaligned_write() {
         let mut rv = RV32ISystem::new();
-        rv.bus.write_word(0x1000_0005, 0xDEAD_BEEF).unwrap();
+        assert_eq!(
+            rv.bus
+                .write_word(0x1000_0005, 0xDEAD_BEEF)
+                .map_err(|e| format!("{}", e)),
+            Err("Unaligned write to address 0x10000005 (value=0xDEADBEEF)".to_string())
+        );
     }
 
     #[test]
@@ -222,16 +268,17 @@ mod tests {
         // ADDI 1, r1, r3
         let pc = 0x1000_0000;
         let pc_plus_4 = 0x1000_0004;
+        let raw_instruction = 0b000000000001_00001_000_00011_0010011;
         rv.cycle();
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
                 pc,
                 pc_plus_4,
-                instruction: 0b000000000001_00001_000_00011_0010011
+                raw_instruction,
             }
         );
-        assert_eq!(rv.state, State::Decode);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -239,6 +286,7 @@ mod tests {
             DecodedValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
                     rd: 0b00011,
@@ -251,7 +299,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::Execute);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -259,6 +307,7 @@ mod tests {
             ExecutionValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x0102_0305,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
@@ -272,7 +321,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::MemoryAccess);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
 
         rv.cycle();
         assert_eq!(
@@ -280,6 +329,7 @@ mod tests {
             MemoryAccessValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x0102_0305,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
@@ -293,25 +343,26 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b00011], 0x0102_0305);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // ADD r1, r2, r4
         let pc = 0x1000_0004;
         let pc_plus_4 = 0x1000_0008;
+        let raw_instruction = 0b0000000_00001_00010_000_00100_0110011;
         rv.cycle();
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
                 pc,
                 pc_plus_4,
-                instruction: 0b0000000_00001_00010_000_00100_0110011
+                raw_instruction,
             }
         );
-        assert_eq!(rv.state, State::Decode);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -319,6 +370,7 @@ mod tests {
             DecodedValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b00100,
@@ -331,7 +383,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::Execute);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -339,6 +391,7 @@ mod tests {
             ExecutionValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x0305_0709,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
@@ -352,7 +405,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::MemoryAccess);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
 
         rv.cycle();
         assert_eq!(
@@ -360,6 +413,7 @@ mod tests {
             MemoryAccessValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x0305_0709,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
@@ -373,25 +427,26 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b00100], 0x0305_0709);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // SUB r1, r2, r4
         let pc = 0x1000_0008;
         let pc_plus_4 = 0x1000_000C;
+        let raw_instruction = 0b0100000_00001_00010_000_00100_0110011;
         rv.cycle();
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
                 pc,
                 pc_plus_4,
-                instruction: 0b0100000_00001_00010_000_00100_0110011
+                raw_instruction,
             }
         );
-        assert_eq!(rv.state, State::Decode);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -399,6 +454,7 @@ mod tests {
             DecodedValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b00100,
@@ -411,7 +467,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::Execute);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -419,6 +475,7 @@ mod tests {
             ExecutionValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x0101_0101,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
@@ -432,7 +489,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::MemoryAccess);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
 
         rv.cycle();
         assert_eq!(
@@ -440,6 +497,7 @@ mod tests {
             MemoryAccessValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x0101_0101,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
@@ -453,25 +511,26 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b00100], 0x0101_0101);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // ADDI -1, r1, r3
         let pc = 0x1000_000C;
         let pc_plus_4 = 0x1000_0010;
+        let raw_instruction = 0b111111111111_00001_000_00011_0010011;
         rv.cycle();
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
                 pc,
                 pc_plus_4,
-                instruction: 0b111111111111_00001_000_00011_0010011
+                raw_instruction,
             }
         );
-        assert_eq!(rv.state, State::Decode);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -479,6 +538,7 @@ mod tests {
             DecodedValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
                     rd: 0b00011,
@@ -491,7 +551,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::Execute);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -499,6 +559,7 @@ mod tests {
             ExecutionValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x0102_0303,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
@@ -512,7 +573,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::MemoryAccess);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
 
         rv.cycle();
         assert_eq!(
@@ -520,6 +581,7 @@ mod tests {
             MemoryAccessValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x0102_0303,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
@@ -533,25 +595,26 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b00011], 0x0102_0303);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // SRL r10, r11, r12
         let pc = 0x1000_0010;
         let pc_plus_4 = 0x1000_0014;
+        let raw_instruction = 0b0000000_01011_01010_101_01100_0110011;
         rv.cycle();
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
                 pc,
                 pc_plus_4,
-                instruction: 0b0000000_01011_01010_101_01100_0110011
+                raw_instruction,
             }
         );
-        assert_eq!(rv.state, State::Decode);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -559,6 +622,7 @@ mod tests {
             DecodedValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b01100,
@@ -571,7 +635,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::Execute);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -579,6 +643,7 @@ mod tests {
             ExecutionValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x4000_0000,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
@@ -592,7 +657,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::MemoryAccess);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
 
         rv.cycle();
         assert_eq!(
@@ -600,6 +665,7 @@ mod tests {
             MemoryAccessValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0x4000_0000,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
@@ -613,25 +679,26 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b01100], 0x4000_0000);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // SRA r10, r11, r12
         let pc = 0x1000_0014;
         let pc_plus_4 = 0x1000_0018;
+        let raw_instruction = 0b0100000_01011_01010_101_01100_0110011;
         rv.cycle();
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
                 pc,
                 pc_plus_4,
-                instruction: 0b0100000_01011_01010_101_01100_0110011
+                raw_instruction,
             }
         );
-        assert_eq!(rv.state, State::Decode);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -639,6 +706,7 @@ mod tests {
             DecodedValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
                     rd: 0b01100,
@@ -651,7 +719,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::Execute);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -659,6 +727,7 @@ mod tests {
             ExecutionValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0xC000_0000,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
@@ -672,7 +741,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::MemoryAccess);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
 
         rv.cycle();
         assert_eq!(
@@ -680,6 +749,7 @@ mod tests {
             MemoryAccessValue {
                 pc,
                 pc_plus_4,
+                raw_instruction,
                 write_back_value: 0xC000_0000,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0110011,
@@ -693,11 +763,11 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b01100], 0xC000_0000);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
     }
 
     #[test]
@@ -726,6 +796,7 @@ mod tests {
             MemoryAccessValue {
                 pc: 0x1000_0000,
                 pc_plus_4: 0x1000_0004,
+                raw_instruction: 0b0000000_00010_00001_010_00100_0100011,
                 write_back_value: 0x0000_0000,
                 instruction: DecodedInstruction::Store {
                     funct3: 0b010,
@@ -735,10 +806,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
         rv.cycle();
         assert_eq!(rv.bus.read_word(0x2000_0004), Ok(0xDEAD_BEEF));
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // SHW r3, r1, imm6
         run_instruction!(rv);
@@ -773,6 +844,7 @@ mod tests {
             MemoryAccessValue {
                 pc: 0x1000_0000,
                 pc_plus_4: 0x1000_0004,
+                raw_instruction: 0b1111111_00010_00001_010_11111_0100011,
                 write_back_value: 0x0000_0000,
                 instruction: DecodedInstruction::Store {
                     funct3: 0b010,
@@ -782,10 +854,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
         rv.cycle();
         assert_eq!(rv.bus.read_word(0x2000_0004), Ok(0xDEAD_BEEF));
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
     }
 
     #[test]
@@ -814,6 +886,7 @@ mod tests {
             MemoryAccessValue {
                 pc: 0x1000_0000,
                 pc_plus_4: 0x1000_0004,
+                raw_instruction: 0b000000000100_00001_010_00010_0000011,
                 write_back_value: 0xDEAD_BEEF,
                 instruction: DecodedInstruction::Load {
                     funct3: 0b010,
@@ -823,10 +896,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
         rv.cycle();
         assert_eq!(rv.reg_file[2], 0xDEAD_BEEF);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // LHW r3, r1, imm6
         rv.cycle();
@@ -838,6 +911,7 @@ mod tests {
             MemoryAccessValue {
                 pc: 0x1000_0004,
                 pc_plus_4: 0x1000_0008,
+                raw_instruction: 0b000000000110_00001_001_00011_0000011,
                 write_back_value: 0xFFFF_BEEF,
                 instruction: DecodedInstruction::Load {
                     funct3: 0b001,
@@ -847,10 +921,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
         rv.cycle();
         assert_eq!(rv.reg_file[3], 0xFFFF_BEEF);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // LB r4, r1, imm7
         rv.cycle();
@@ -862,6 +936,7 @@ mod tests {
             MemoryAccessValue {
                 pc: 0x1000_0008,
                 pc_plus_4: 0x1000_000C,
+                raw_instruction: 0b000000000111_00001_000_00100_0000011,
                 write_back_value: 0xFFFF_FFEF,
                 instruction: DecodedInstruction::Load {
                     funct3: 0b000,
@@ -871,10 +946,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
         rv.cycle();
         assert_eq!(rv.reg_file[4], 0xFFFF_FFEF);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // LHWU r5, r1, imm6
         rv.cycle();
@@ -886,6 +961,7 @@ mod tests {
             MemoryAccessValue {
                 pc: 0x1000_000C,
                 pc_plus_4: 0x1000_0010,
+                raw_instruction: 0b000000000110_00001_101_00101_0000011,
                 write_back_value: 0x0000_BEEF,
                 instruction: DecodedInstruction::Load {
                     funct3: 0b101,
@@ -895,10 +971,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
         rv.cycle();
         assert_eq!(rv.reg_file[5], 0x0000_BEEF);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // LBU r6, r1, imm7
         rv.cycle();
@@ -910,6 +986,7 @@ mod tests {
             MemoryAccessValue {
                 pc: 0x1000_0010,
                 pc_plus_4: 0x1000_0014,
+                raw_instruction: 0b000000000111_00001_100_00110_0000011,
                 write_back_value: 0x0000_00EF,
                 instruction: DecodedInstruction::Load {
                     funct3: 0b100,
@@ -919,10 +996,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
         rv.cycle();
         assert_eq!(rv.reg_file[6], 0x0000_00EF);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         // LW r11, r10, imm-1
         rv.cycle();
@@ -934,6 +1011,7 @@ mod tests {
             MemoryAccessValue {
                 pc: 0x1000_0014,
                 pc_plus_4: 0x1000_0018,
+                raw_instruction: 0b111111111111_01010_010_01011_0000011,
                 write_back_value: 0xDEAD_BEEF,
                 instruction: DecodedInstruction::Load {
                     funct3: 0b010,
@@ -943,10 +1021,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, State::WriteBack);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
         rv.cycle();
         assert_eq!(rv.reg_file[11], 0xDEAD_BEEF);
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
     }
 
     #[test]
@@ -966,6 +1044,7 @@ mod tests {
             DecodedValue {
                 pc: 0x1000_0000,
                 pc_plus_4: 0x1000_0004,
+                raw_instruction: 0b10101010101010101010_00001_0110111,
                 instruction: DecodedInstruction::Lui {
                     rd: 0b00001,
                     imm32: 0b10101010101010101010_000000000000,
@@ -975,7 +1054,7 @@ mod tests {
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
         assert_eq!(rv.reg_file[1], 0xAAAA_A000);
 
         // ADDI r1, 0xAAAAA
@@ -986,6 +1065,7 @@ mod tests {
             DecodedValue {
                 pc: 0x1000_0004,
                 pc_plus_4: 0x1000_0008,
+                raw_instruction: 0b101010101010_00001_000_00001_0010011,
                 instruction: DecodedInstruction::Alu {
                     opcode: 0b0010011,
                     rd: 0b00001,
@@ -1001,7 +1081,7 @@ mod tests {
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
         assert_eq!(rv.reg_file[1], 0xAAAA_9AAA);
     }
 
@@ -1047,17 +1127,18 @@ mod tests {
             DecodedValue {
                 pc: 0x1000_0008,
                 pc_plus_4: 0x1000_000C,
+                raw_instruction: 0b0_0000011110_0_00000000_00000_1101111,
                 instruction: DecodedInstruction::Jal {
                     rd: 0b00000,
                     branch_address: 0x1000_0044,
                 }
             }
         );
-        assert_eq!(rv.state, State::Execute);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         rv.cycle();
         assert_eq!(
@@ -1065,14 +1146,14 @@ mod tests {
             InstructionValue {
                 pc: 0x1000_0044,
                 pc_plus_4: 0x1000_0048,
-                instruction: 0,
+                raw_instruction: 0,
             }
         );
         rv.cycle();
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         for _ in 0..3 {
             run_instruction!(rv);
@@ -1083,7 +1164,7 @@ mod tests {
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
-                instruction: 0b1_1111011100_1_11111111_00001_1101111,
+                raw_instruction: 0b1_1111011100_1_11111111_00001_1101111,
                 pc: 0x1000_0054,
                 pc_plus_4: 0x1000_0058,
             }
@@ -1094,17 +1175,18 @@ mod tests {
             DecodedValue {
                 pc: 0x1000_0054,
                 pc_plus_4: 0x1000_0058,
+                raw_instruction: 0b1_1111011100_1_11111111_00001_1101111,
                 instruction: DecodedInstruction::Jal {
                     rd: 0b00001,
                     branch_address: 0x1000_000C,
                 }
             }
         );
-        assert_eq!(rv.state, State::Execute);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         rv.cycle();
         assert_eq!(
@@ -1112,14 +1194,14 @@ mod tests {
             InstructionValue {
                 pc: 0x1000_000C,
                 pc_plus_4: 0x1000_0010,
-                instruction: 0,
+                raw_instruction: 0,
             }
         );
         rv.cycle();
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         for _ in 0..12 {
             run_instruction!(rv);
@@ -1130,7 +1212,7 @@ mod tests {
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
-                instruction: 0b000000000000_00001_000_00000_1100111,
+                raw_instruction: 0b000000000000_00001_000_00000_1100111,
                 pc: 0x1000_0040,
                 pc_plus_4: 0x1000_0044,
             }
@@ -1141,17 +1223,18 @@ mod tests {
             DecodedValue {
                 pc: 0x1000_0040,
                 pc_plus_4: 0x1000_0044,
+                raw_instruction: 0b000000000000_00001_000_00000_1100111,
                 instruction: DecodedInstruction::Jal {
                     rd: 0b00000,
                     branch_address: 0x1000_0058,
                 }
             }
         );
-        assert_eq!(rv.state, State::Execute);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
 
         rv.cycle();
         assert_eq!(
@@ -1159,13 +1242,13 @@ mod tests {
             InstructionValue {
                 pc: 0x1000_0058,
                 pc_plus_4: 0x1000_005C,
-                instruction: 0,
+                raw_instruction: 0,
             }
         );
         rv.cycle();
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, State::Fetch);
+        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
     }
 }

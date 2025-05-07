@@ -1,4 +1,4 @@
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct LatchValue<T>
 where
     T: Clone,

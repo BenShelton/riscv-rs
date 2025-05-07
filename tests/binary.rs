@@ -1,4 +1,8 @@
-use riscv::{RV32ISystem, State, system_interface::MMIODevice};
+use riscv::{
+    CPUState, PipelineState, RV32ISystem,
+    system_interface::MMIODevice,
+    trap::{MCAUSE_LOAD_ADDRESS_MISALIGNED, TrapState},
+};
 
 macro_rules! run_instruction {
     ($rv:expr) => {
@@ -7,7 +11,7 @@ macro_rules! run_instruction {
         $rv.cycle();
         $rv.cycle();
         $rv.cycle();
-        assert_eq!($rv.state, State::Fetch);
+        assert_eq!($rv.state, CPUState::Pipeline(PipelineState::Fetch));
     };
 }
 
@@ -250,7 +254,6 @@ fn test_binary_5() {
 }
 
 #[test]
-#[should_panic /*(expected = "Unaligned read from address 0x203FFFEE") */]
 fn test_binary_6() {
     let instructions = load_binary("binary6.bin");
 
@@ -259,5 +262,36 @@ fn test_binary_6() {
 
     // 10000080:    01010413    addi x8,x2,16
     run_to_line!(rv, 0x1000_0080);
+
+    // 10000084:    00112703    lw x14,1(x2)
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Trap);
+    assert_eq!(rv.trap.mepc.get(), &0x1000_0088);
+    assert_eq!(rv.trap.mcause.get(), &MCAUSE_LOAD_ADDRESS_MISALIGNED);
+    assert_eq!(rv.trap.mtval.get(), &0x0011_2703);
+    assert_eq!(rv.trap.state.get(), &TrapState::SetCSRLoadJump);
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Trap);
+    assert_eq!(rv.trap.state.get(), &TrapState::SetPc);
+    rv.cycle();
+    assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+    assert_eq!(rv.current_line(), 0x1000_0134);
+
+    // 10000134:    fe010113    addi x2,x2,-32
     run_instruction!(rv);
+    assert_eq!(rv.reg_file[2], 0x203F_FFCC);
+
+    run_to_line!(rv, 0x1000_014C);
+    assert_eq!(rv.reg_file[15], 0x0000_002A /* 42 */);
+
+    run_to_line!(rv, 0x1000_0180);
+    assert_eq!(rv.reg_file[2], 0x203F_FFEC);
+    assert_eq!(rv.reg_file[14], 0x2000_0000);
+    assert_eq!(rv.reg_file[15], 0x2000_0000);
 }

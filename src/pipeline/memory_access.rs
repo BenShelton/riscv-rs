@@ -1,6 +1,7 @@
 use crate::{
     csr::{CSR_OPERATION_RC, CSR_OPERATION_RS, CSR_OPERATION_RW, CSRInterface},
-    system_interface::{MMIODevice, SystemInterface},
+    system_interface::{MMIODevice, MMIOError, SystemInterface},
+    trap::MCAUSE_LOAD_ADDRESS_MISALIGNED,
     utils::{LatchValue, sign_extend_32},
 };
 
@@ -12,6 +13,7 @@ pub struct MemoryAccessValue {
     pub pc: u32,
     pub pc_plus_4: u32,
     pub instruction: DecodedInstruction,
+    pub raw_instruction: u32,
 }
 
 const WIDTH_BYTE: u8 = 0b000;
@@ -23,6 +25,7 @@ pub struct InstructionMemoryAccess {
     pc: LatchValue<u32>,
     pc_plus_4: LatchValue<u32>,
     instruction: LatchValue<DecodedInstruction>,
+    raw_instruction: LatchValue<u32>,
 }
 
 pub struct InstructionMemoryAccessParams<'a> {
@@ -30,6 +33,7 @@ pub struct InstructionMemoryAccessParams<'a> {
     pub execution_value_in: ExecutionValue,
     pub bus: &'a mut SystemInterface,
     pub csr: &'a mut CSRInterface,
+    pub trap: Box<dyn FnOnce(u32, u32, u32) + 'a>,
 }
 
 impl InstructionMemoryAccess {
@@ -39,6 +43,7 @@ impl InstructionMemoryAccess {
             pc: LatchValue::new(0),
             pc_plus_4: LatchValue::new(0),
             instruction: LatchValue::new(DecodedInstruction::None),
+            raw_instruction: LatchValue::new(0),
         }
     }
 
@@ -48,6 +53,7 @@ impl InstructionMemoryAccess {
             instruction: *self.instruction.get(),
             pc: *self.pc.get(),
             pc_plus_4: *self.pc_plus_4.get(),
+            raw_instruction: *self.raw_instruction.get(),
         }
     }
 }
@@ -61,6 +67,7 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
         self.instruction.set(execution_value.instruction);
         self.pc.set(execution_value.pc);
         self.pc_plus_4.set(execution_value.pc_plus_4);
+        self.raw_instruction.set(execution_value.raw_instruction);
 
         match execution_value.instruction {
             DecodedInstruction::Alu { .. } => {
@@ -71,28 +78,39 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
             } => {
                 let addr = (imm32 + rs1 as i32) as u32;
                 let should_sign_extend = funct3 & 0b100 == 0;
-                self.write_back_value.set(match funct3 & 0b011 {
-                    WIDTH_BYTE => {
-                        let v = params.bus.read_byte(addr).unwrap();
+                let result = match funct3 & 0b011 {
+                    WIDTH_BYTE => params.bus.read_byte(addr).map(|v| {
                         if should_sign_extend {
                             sign_extend_32(8, v as i32) as u32
                         } else {
                             v as u32
                         }
-                    }
-                    WIDTH_HALF => {
-                        let v = params.bus.read_half_word(addr).unwrap();
+                    }),
+                    WIDTH_HALF => params.bus.read_half_word(addr).map(|v| {
                         if should_sign_extend {
                             sign_extend_32(16, v as i32) as u32
                         } else {
                             v as u32
                         }
-                    }
-                    WIDTH_WORD => params.bus.read_word(addr).unwrap(),
+                    }),
+                    WIDTH_WORD => params.bus.read_word(addr),
                     _ => {
                         panic!("Invalid funct3 for load operation");
                     }
-                });
+                };
+                match result {
+                    Ok(value) => self.write_back_value.set(value),
+                    Err(MMIOError::UnalignedRead(_)) => {
+                        (params.trap)(
+                            execution_value.pc_plus_4,
+                            MCAUSE_LOAD_ADDRESS_MISALIGNED,
+                            execution_value.raw_instruction,
+                        );
+                    }
+                    Err(e) => {
+                        panic!("Error reading memory: {}", e);
+                    }
+                }
             }
             DecodedInstruction::Store {
                 funct3,
@@ -101,18 +119,25 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                 rs2,
             } => {
                 let addr = (imm32 + rs1 as i32) as u32;
-                match funct3 {
-                    WIDTH_BYTE => {
-                        params.bus.write_byte(addr, rs2 as u8).unwrap();
-                    }
-                    WIDTH_HALF => {
-                        params.bus.write_half_word(addr, rs2 as u16).unwrap();
-                    }
-                    WIDTH_WORD => {
-                        params.bus.write_word(addr, rs2).unwrap();
-                    }
+                let result = match funct3 {
+                    WIDTH_BYTE => params.bus.write_byte(addr, rs2 as u8),
+                    WIDTH_HALF => params.bus.write_half_word(addr, rs2 as u16),
+                    WIDTH_WORD => params.bus.write_word(addr, rs2),
                     _ => {
                         panic!("Invalid funct3 for store operation");
+                    }
+                };
+                match result {
+                    Ok(_) => {}
+                    Err(MMIOError::UnalignedWrite(_, _)) => {
+                        (params.trap)(
+                            execution_value.pc_plus_4,
+                            MCAUSE_LOAD_ADDRESS_MISALIGNED,
+                            execution_value.raw_instruction,
+                        );
+                    }
+                    Err(e) => {
+                        panic!("Error reading memory: {}", e);
                     }
                 }
             }
@@ -167,5 +192,6 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
         self.instruction.latch_next();
         self.pc.latch_next();
         self.pc_plus_4.latch_next();
+        self.raw_instruction.latch_next();
     }
 }
