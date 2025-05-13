@@ -30,15 +30,17 @@ binary-clean:
 [working-directory: 'system_code/v1']
 @binary-compile-1 filename:
     mkdir -p build
-    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -T link.ld -nostdlib bootloader.S ../../tests/binaries/{{filename}}.c -o build/{{filename}}.elf
+    rm -f build/binary*
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -T link.ld -nostdlib crt0.S ../../tests/binaries/{{filename}}.c -o build/{{filename}}.elf
     ../../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .text build/{{filename}}.elf ../../tests/binaries/{{filename}}.bin
 
 # Compiles the specified `.c` file in the `tests/binaries` directory, version 2
 [working-directory: 'system_code/v2']
 @binary-compile-2 filename:
     mkdir -p build
+    rm -f build/binary*
     ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -I inc -c -ffreestanding -nostdlib src/boot.c -o build/boot.o
-    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -I inc -c -ffreestanding -nostdlib src/bootloader.S -o build/bootloader.o
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -I inc -c -ffreestanding -nostdlib src/crt0.S -o build/crt0.o
     ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -I inc -c -ffreestanding -nostdlib src/isr.c -o build/isr.o
     ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -I inc -c -ffreestanding -nostdlib ../../tests/binaries/{{filename}}.c -o build/{{filename}}.o
     ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i -T link.ld -ffreestanding -nostdlib build/*.o -o build/{{filename}}.elf
