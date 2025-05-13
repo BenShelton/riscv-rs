@@ -111,7 +111,6 @@ impl RV32ISystem {
         self.trap.compute(TrapParams {
             should_stall: current_state != CPUState::Trap,
             csr: &mut self.csr,
-            bus: &mut self.bus,
             set_pc: Box::new(|pc| {
                 self.stage_if.pc.set(pc);
                 self.stage_if.pc_plus_4.set(pc);

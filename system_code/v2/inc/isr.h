@@ -4,7 +4,6 @@
 typedef void (*ISRFunction)(void);
 
 #define ISR(ISR_TYPE) void __attribute__((interrupt)) ISR_TYPE(void)
-#define VECTOR_TABLE(NAME) static const ISRFunction NAME[] __attribute__((section (".vectortable"))) =
 
 #define UserSoftwareInterrupt       vector_int_0
 #define SupervisorSoftwareInterrupt vector_int_1

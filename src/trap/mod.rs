@@ -1,8 +1,4 @@
-use crate::{
-    csr::CSRInterface,
-    system_interface::{MMIODevice, SystemInterface},
-    utils::LatchValue,
-};
+use crate::{csr::CSRInterface, utils::LatchValue};
 
 pub const MCAUSE_USER_SOFTWARE_INTERRUPT: u32 = 0x8000_0000;
 pub const MCAUSE_SUPERVISOR_SOFTWARE_INTERRUPT: u32 = 0x8000_0001;
@@ -38,7 +34,7 @@ pub const MCAUSE_STORE_AMO_PAGE_FAULT: u32 = 0x0000_000F;
 pub enum TrapState {
     #[default]
     Idle,
-    SetCSRLoadJump,
+    SetCSRJump,
     SetPc,
     ReturnFromTrap,
 }
@@ -46,7 +42,6 @@ pub enum TrapState {
 pub struct TrapParams<'a> {
     pub should_stall: bool,
     pub csr: &'a mut CSRInterface,
-    pub bus: &'a mut SystemInterface,
     pub set_pc: Box<dyn FnOnce(u32) + 'a>,
     pub return_to_pipeline_mode: Box<dyn FnOnce() + 'a>,
 }
@@ -75,7 +70,7 @@ impl TrapInterface {
         self.mepc.set(mepc);
         self.mcause.set(mcause);
         self.mtval.set(mtval);
-        self.state.set(TrapState::SetCSRLoadJump);
+        self.state.set(TrapState::SetCSRJump);
     }
 
     pub fn trap_return(&mut self) {
@@ -89,7 +84,7 @@ impl TrapInterface {
 
         match self.state.get() {
             TrapState::Idle => {}
-            TrapState::SetCSRLoadJump => {
+            TrapState::SetCSRJump => {
                 let mcause = self.mcause.get();
                 params.csr.mepc = *self.mepc.get();
                 params.csr.mcause = *mcause;
@@ -98,10 +93,11 @@ impl TrapInterface {
                 let index = mcause & 0x7FFF_FFFF;
                 let is_interrupt = (mcause & 0x8000_0000) != 0;
                 let offset = if is_interrupt { 0 } else { 48 };
-                let addr = params.csr.mtvec + offset + (index << 2);
+                let addr = (params.csr.mtvec & 0xFFFF_FFFC) + offset + (index << 2);
 
-                self.pc_to_set.set(params.bus.read_word(addr).unwrap());
-                self.state.set(TrapState::SetPc);
+                (params.set_pc)(addr);
+                (params.return_to_pipeline_mode)();
+                self.state.set(TrapState::Idle);
             }
             TrapState::SetPc => {
                 (params.set_pc)(*self.pc_to_set.get());

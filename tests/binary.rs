@@ -260,10 +260,10 @@ fn test_binary_6() {
     let mut rv = RV32ISystem::new();
     rv.bus.rom.load(instructions);
 
-    // 10000080:    01010413    addi x8,x2,16
-    run_to_line!(rv, 0x1000_0080);
+    // 10000084:    01010413    addi x8,x2,16
+    run_to_line!(rv, 0x1000_0084);
 
-    // 10000084:    00112703    lw x14,1(x2)
+    // 10000088:    00112703    lw x14,1(x2)
     rv.cycle();
     assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
     rv.cycle();
@@ -272,25 +272,27 @@ fn test_binary_6() {
     assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
     rv.cycle();
     assert_eq!(rv.state, CPUState::Trap);
-    assert_eq!(rv.trap.mepc.get(), &0x1000_0088);
+    assert_eq!(rv.trap.mepc.get(), &0x1000_008C);
     assert_eq!(rv.trap.mcause.get(), &MCAUSE_LOAD_ADDRESS_MISALIGNED);
     assert_eq!(rv.trap.mtval.get(), &0x0011_2703);
-    assert_eq!(rv.trap.state.get(), &TrapState::SetCSRLoadJump);
-    rv.cycle();
-    assert_eq!(rv.state, CPUState::Trap);
-    assert_eq!(rv.trap.state.get(), &TrapState::SetPc);
+    assert_eq!(rv.trap.state.get(), &TrapState::SetCSRJump);
     rv.cycle();
     assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
-    assert_eq!(rv.current_line(), 0x1000_0134);
+    assert_eq!(rv.current_line(), 0x1000_0044);
 
-    // 10000134:    fe010113    addi x2,x2,-32
+    // 10000044:    0f40006f    jal x0,10000138 <__LoadAddressMisaligned>
+    run_instruction!(rv);
+    run_instruction!(rv);
+    assert_eq!(rv.current_line(), 0x1000_0138);
+
+    // 10000138:    fe010113    addi x2,x2,-32
     run_instruction!(rv);
     assert_eq!(rv.reg_file[2], 0x203F_FFCC);
 
-    run_to_line!(rv, 0x1000_014C);
+    run_to_line!(rv, 0x1000_0150);
     assert_eq!(rv.reg_file[15], 0x0000_002A /* 42 */);
 
-    run_to_line!(rv, 0x1000_0180);
+    run_to_line!(rv, 0x1000_0184);
     assert_eq!(rv.reg_file[2], 0x203F_FFEC);
     assert_eq!(rv.reg_file[14], 0x2000_0000);
     assert_eq!(rv.reg_file[15], 0x2000_0000);
@@ -305,5 +307,5 @@ fn test_binary_6() {
     assert_eq!(rv.trap.state.get(), &TrapState::SetPc);
     rv.cycle();
     assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
-    assert_eq!(rv.current_line(), 0x1000_0088);
+    assert_eq!(rv.current_line(), 0x1000_008C);
 }
