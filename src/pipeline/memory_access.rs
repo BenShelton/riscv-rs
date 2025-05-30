@@ -14,6 +14,10 @@ pub struct MemoryAccessValue {
     pub pc_plus_4: u32,
     pub instruction: DecodedInstruction,
     pub raw_instruction: u32,
+    pub mepc: u32,
+    pub mcause: u32,
+    pub mtval: u32,
+    pub trap: bool,
 }
 
 const WIDTH_BYTE: u8 = 0b000;
@@ -26,6 +30,10 @@ pub struct InstructionMemoryAccess {
     pc_plus_4: LatchValue<u32>,
     instruction: LatchValue<DecodedInstruction>,
     raw_instruction: LatchValue<u32>,
+    mepc: LatchValue<u32>,
+    mcause: LatchValue<u32>,
+    mtval: LatchValue<u32>,
+    trap: LatchValue<bool>,
 }
 
 pub struct InstructionMemoryAccessParams<'a> {
@@ -33,7 +41,6 @@ pub struct InstructionMemoryAccessParams<'a> {
     pub execution_value_in: ExecutionValue,
     pub bus: &'a mut SystemInterface,
     pub csr: &'a mut CSRInterface,
-    pub trap: Box<dyn FnOnce(u32, u32, u32) + 'a>,
 }
 
 impl InstructionMemoryAccess {
@@ -44,6 +51,10 @@ impl InstructionMemoryAccess {
             pc_plus_4: LatchValue::new(0),
             instruction: LatchValue::new(DecodedInstruction::None),
             raw_instruction: LatchValue::new(0),
+            mepc: LatchValue::new(0),
+            mcause: LatchValue::new(0),
+            mtval: LatchValue::new(0),
+            trap: LatchValue::new(false),
         }
     }
 
@@ -54,6 +65,10 @@ impl InstructionMemoryAccess {
             pc: *self.pc.get(),
             pc_plus_4: *self.pc_plus_4.get(),
             raw_instruction: *self.raw_instruction.get(),
+            mepc: *self.mepc.get(),
+            mcause: *self.mcause.get(),
+            mtval: *self.mtval.get(),
+            trap: *self.trap.get(),
         }
     }
 }
@@ -61,6 +76,7 @@ impl InstructionMemoryAccess {
 impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAccess {
     fn compute(&mut self, params: InstructionMemoryAccessParams) {
         if params.should_stall {
+            self.trap.set(false);
             return;
         }
         let execution_value = params.execution_value_in;
@@ -101,11 +117,10 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                 match result {
                     Ok(value) => self.write_back_value.set(value),
                     Err(MMIOError::UnalignedRead(_)) => {
-                        (params.trap)(
-                            execution_value.pc_plus_4,
-                            MCAUSE_LOAD_ADDRESS_MISALIGNED,
-                            execution_value.raw_instruction,
-                        );
+                        self.mepc.set(execution_value.pc_plus_4);
+                        self.mcause.set(MCAUSE_LOAD_ADDRESS_MISALIGNED);
+                        self.mtval.set(execution_value.raw_instruction);
+                        self.trap.set(true);
                     }
                     Err(e) => {
                         panic!("Error reading memory: {}", e);
@@ -130,11 +145,10 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                 match result {
                     Ok(_) => {}
                     Err(MMIOError::UnalignedWrite(_, _)) => {
-                        (params.trap)(
-                            execution_value.pc_plus_4,
-                            MCAUSE_LOAD_ADDRESS_MISALIGNED,
-                            execution_value.raw_instruction,
-                        );
+                        self.mepc.set(execution_value.pc_plus_4);
+                        self.mcause.set(MCAUSE_LOAD_ADDRESS_MISALIGNED);
+                        self.mtval.set(execution_value.raw_instruction);
+                        self.trap.set(true);
                     }
                     Err(e) => {
                         panic!("Error reading memory: {}", e);
@@ -193,5 +207,9 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
         self.pc.latch_next();
         self.pc_plus_4.latch_next();
         self.raw_instruction.latch_next();
+        self.mepc.latch_next();
+        self.mcause.latch_next();
+        self.mtval.latch_next();
+        self.trap.latch_next();
     }
 }

@@ -63,6 +63,7 @@ pub struct DecodedValue {
     pub raw_instruction: u32,
     pub pc: u32,
     pub pc_plus_4: u32,
+    pub return_from_trap: bool,
 }
 
 pub struct InstructionDecode {
@@ -70,13 +71,13 @@ pub struct InstructionDecode {
     raw_instruction: LatchValue<u32>,
     pc: LatchValue<u32>,
     pc_plus_4: LatchValue<u32>,
+    return_from_trap: LatchValue<bool>,
 }
 
 pub struct InstructionDecodeParams<'a> {
     pub should_stall: bool,
     pub instruction_in: InstructionValue,
     pub reg_file: &'a mut RegisterFile,
-    pub trap_return: Box<dyn FnOnce() + 'a>,
 }
 
 impl InstructionDecode {
@@ -86,6 +87,7 @@ impl InstructionDecode {
             raw_instruction: LatchValue::new(0),
             pc: LatchValue::new(0),
             pc_plus_4: LatchValue::new(0),
+            return_from_trap: LatchValue::new(false),
         }
     }
 
@@ -95,6 +97,7 @@ impl InstructionDecode {
             raw_instruction: *self.raw_instruction.get(),
             pc: *self.pc.get(),
             pc_plus_4: *self.pc_plus_4.get(),
+            return_from_trap: *self.return_from_trap.get(),
         }
     }
 }
@@ -102,6 +105,7 @@ impl InstructionDecode {
 impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
     fn compute(&mut self, params: InstructionDecodeParams<'a>) {
         if params.should_stall {
+            self.return_from_trap.set(false);
             return;
         }
         let instruction = params.instruction_in.raw_instruction;
@@ -222,10 +226,8 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                 let funct3 = ((instruction >> 12) & 0x07) as u8;
                 let imm11_0 = instruction >> 20;
 
-                if rd == 0 && rs1_address == 0 && imm11_0 == 0x302 {
-                    (params.trap_return)();
-                    return;
-                }
+                self.return_from_trap
+                    .set(rd == 0 && rs1_address == 0 && imm11_0 == 0x302);
 
                 let source = match funct3 & 0b100 {
                     0b100 => rs1_address as u32,
@@ -266,5 +268,6 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
         self.raw_instruction.latch_next();
         self.pc.latch_next();
         self.pc_plus_4.latch_next();
+        self.return_from_trap.latch_next();
     }
 }

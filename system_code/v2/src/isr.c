@@ -10,7 +10,7 @@ ISR(__LoadAddressMisaligned) {
 }
 
 ISR(__ISRExceptionCrash) {
-  while (1) {}
+    while (1) {}
 }
 
 static void __attribute__((section (".vectortable"), naked)) vectorTable(void) {

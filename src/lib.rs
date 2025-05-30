@@ -18,6 +18,7 @@ use pipeline::{
 };
 use system_interface::{RamDevice, RomDevice, SystemInterface};
 use trap::{TrapInterface, TrapParams};
+use utils::LatchValue;
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum CPUState {
@@ -40,8 +41,12 @@ pub struct RV32ISystem {
     pub bus: SystemInterface,
     pub csr: CSRInterface,
     pub trap: TrapInterface,
-    pub state: CPUState,
+    pub state: LatchValue<CPUState>,
     pub reg_file: RegisterFile,
+    /// This is acting as a combinational signal, not a reg
+    pub trap_stall: bool,
+    /// This is acting as a combinational signal, not a reg
+    pub mret: bool,
     stage_if: InstructionFetch,
     stage_de: InstructionDecode,
     stage_ex: InstructionExecute,
@@ -58,8 +63,10 @@ impl RV32ISystem {
             bus: SystemInterface::new(rom, ram),
             csr: CSRInterface::new(),
             trap: TrapInterface::new(),
-            state: CPUState::Pipeline(PipelineState::Fetch),
+            state: LatchValue::new(CPUState::Pipeline(PipelineState::Fetch)),
             reg_file: [0u32; 32],
+            trap_stall: false,
+            mret: false,
             stage_if: InstructionFetch::new(),
             stage_de: InstructionDecode::new(),
             stage_ex: InstructionExecute::new(),
@@ -69,9 +76,34 @@ impl RV32ISystem {
     }
 
     pub fn compute(&mut self) {
-        let current_state = self.state;
+        let mem_values = self.stage_ma.get_memory_access_value_out();
+        self.mret = self.stage_de.get_decoded_instruction_out().return_from_trap;
+        self.trap_stall = self.state.get() == &CPUState::Trap || mem_values.trap || self.mret;
+
+        if self.trap_stall && matches!(self.state.get(), &CPUState::Pipeline(_)) {
+            self.state.set(CPUState::Trap);
+
+            // TODO: Some sort of better multiplexer selector abstraction?
+            if mem_values.trap {
+                self.trap.mcause.set(mem_values.mcause);
+                self.trap.mepc.set(mem_values.mepc);
+                self.trap.mtval.set(mem_values.mtval);
+            }
+        } else if self.state.get() == &CPUState::Trap && *self.trap.return_to_pipeline_mode.get() {
+            self.state.set(CPUState::Pipeline(PipelineState::Fetch));
+            if *self.trap.set_pc.get() {
+                self.stage_if.pc.set(*self.trap.pc_to_set.get());
+                self.stage_if.pc_plus_4.set(*self.trap.pc_to_set.get());
+            }
+        }
+
+        if matches!(self.state.get(), &CPUState::Pipeline(_)) && self.mret {
+            self.state.set(CPUState::Trap);
+        }
+
         self.stage_if.compute(InstructionFetchParams {
-            should_stall: current_state != CPUState::Pipeline(PipelineState::Fetch),
+            should_stall: self.trap_stall
+                || *self.state.get() != CPUState::Pipeline(PipelineState::Fetch),
             branch_address: match self.stage_ex.get_execution_value_out().instruction {
                 DecodedInstruction::Jal { branch_address, .. } => Some(branch_address),
                 DecodedInstruction::Branch { branch_address, .. } => Some(branch_address),
@@ -80,63 +112,38 @@ impl RV32ISystem {
             bus: &self.bus,
         });
         self.stage_de.compute(InstructionDecodeParams {
-            should_stall: current_state != CPUState::Pipeline(PipelineState::Decode),
+            should_stall: self.trap_stall
+                || *self.state.get() != CPUState::Pipeline(PipelineState::Decode),
             instruction_in: self.stage_if.get_instruction_value_out(),
             reg_file: &mut self.reg_file,
-            trap_return: Box::new(|| {
-                self.trap.trap_return();
-                self.state = CPUState::Trap;
-            }),
         });
         self.stage_ex.compute(InstructionExecuteParams {
-            should_stall: current_state != CPUState::Pipeline(PipelineState::Execute),
+            should_stall: self.trap_stall
+                || *self.state.get() != CPUState::Pipeline(PipelineState::Execute),
             decoded_instruction_in: self.stage_de.get_decoded_instruction_out(),
         });
         self.stage_ma.compute(InstructionMemoryAccessParams {
-            should_stall: current_state != CPUState::Pipeline(PipelineState::MemoryAccess),
+            should_stall: self.trap_stall
+                || *self.state.get() != CPUState::Pipeline(PipelineState::MemoryAccess),
             execution_value_in: self.stage_ex.get_execution_value_out(),
             bus: &mut self.bus,
             csr: &mut self.csr,
-            trap: Box::new(|mepc: u32, mcause: u32, mtval: u32| {
-                self.trap.trap_exception(mepc, mcause, mtval);
-                self.state = CPUState::Trap;
-            }),
         });
         self.stage_wb.compute(InstructionWriteBackParams {
-            should_stall: current_state != CPUState::Pipeline(PipelineState::WriteBack),
+            should_stall: self.trap_stall
+                || *self.state.get() != CPUState::Pipeline(PipelineState::WriteBack),
             memory_access_value_in: self.stage_ma.get_memory_access_value_out(),
             reg_file: &mut self.reg_file,
         });
         self.csr.compute();
         self.trap.compute(TrapParams {
-            should_stall: current_state != CPUState::Trap,
             csr: &mut self.csr,
-            set_pc: Box::new(|pc| {
-                self.stage_if.pc.set(pc);
-                self.stage_if.pc_plus_4.set(pc);
-            }),
-            return_to_pipeline_mode: Box::new(|| {
-                self.state = CPUState::Pipeline(PipelineState::Fetch);
-            }),
+            begin_trap: self.stage_ma.get_memory_access_value_out().trap,
+            begin_trap_return: self.stage_de.get_decoded_instruction_out().return_from_trap,
         });
-    }
 
-    pub fn latch_next(&mut self) {
-        self.stage_if.latch_next();
-        self.stage_de.latch_next();
-        self.stage_ex.latch_next();
-        self.stage_ma.latch_next();
-        self.stage_wb.latch_next();
-        self.trap.latch_next();
-    }
-
-    pub fn cycle(&mut self) {
-        let current_state = self.state;
-        self.compute();
-        self.latch_next();
-
-        if self.state != CPUState::Trap {
-            self.state = match current_state {
+        if !self.trap_stall {
+            self.state.set(match *self.state.get() {
                 CPUState::Pipeline(PipelineState::Fetch) => {
                     CPUState::Pipeline(PipelineState::Decode)
                 }
@@ -153,11 +160,25 @@ impl RV32ISystem {
                     self.csr.instret.set(self.csr.instret.get() + 1);
                     CPUState::Pipeline(PipelineState::Fetch)
                 }
-                _ => self.state,
-            };
-        };
+                _ => *self.state.get(),
+            });
+        }
+    }
 
+    pub fn latch_next(&mut self) {
+        self.stage_if.latch_next();
+        self.stage_de.latch_next();
+        self.stage_ex.latch_next();
+        self.stage_ma.latch_next();
+        self.stage_wb.latch_next();
         self.csr.latch_next();
+        self.trap.latch_next();
+        self.state.latch_next();
+    }
+
+    pub fn cycle(&mut self) {
+        self.compute();
+        self.latch_next();
     }
 
     pub fn current_line(&self) -> u32 {
@@ -182,6 +203,7 @@ mod tests {
             memory_access::MemoryAccessValue,
         },
         system_interface::MMIODevice,
+        trap::{MCAUSE_LOAD_ADDRESS_MISALIGNED, TrapState},
     };
 
     macro_rules! run_instruction {
@@ -191,7 +213,7 @@ mod tests {
             $rv.cycle();
             $rv.cycle();
             $rv.cycle();
-            assert_eq!($rv.state, CPUState::Pipeline(PipelineState::Fetch));
+            assert_eq!(*$rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
         };
     }
 
@@ -281,7 +303,7 @@ mod tests {
                 raw_instruction,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -299,10 +321,11 @@ mod tests {
                     rs2: 0x0102_0304,
                     shamt: 0b00001,
                     imm32: 0b000000000001,
-                }
+                },
+                return_from_trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -324,7 +347,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::MemoryAccess)
+        );
 
         rv.cycle();
         assert_eq!(
@@ -343,14 +369,21 @@ mod tests {
                     rs2: 0x0102_0304,
                     shamt: 0b00001,
                     imm32: 0b000000000001,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b00011], 0x0102_0305);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // ADD r1, r2, r4
         let pc = 0x1000_0004;
@@ -365,7 +398,7 @@ mod tests {
                 raw_instruction,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -383,10 +416,11 @@ mod tests {
                     rs2: 0x0102_0304,
                     shamt: 0b00001,
                     imm32: 0b000000000001,
-                }
+                },
+                return_from_trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -408,7 +442,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::MemoryAccess)
+        );
 
         rv.cycle();
         assert_eq!(
@@ -427,14 +464,21 @@ mod tests {
                     rs2: 0x0102_0304,
                     shamt: 0b00001,
                     imm32: 0b000000000001,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b00100], 0x0305_0709);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // SUB r1, r2, r4
         let pc = 0x1000_0008;
@@ -449,7 +493,7 @@ mod tests {
                 raw_instruction,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -467,10 +511,11 @@ mod tests {
                     rs2: 0x0102_0304,
                     shamt: 0b00001,
                     imm32: 0b010000000001,
-                }
+                },
+                return_from_trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -492,7 +537,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::MemoryAccess)
+        );
 
         rv.cycle();
         assert_eq!(
@@ -511,14 +559,21 @@ mod tests {
                     rs2: 0x0102_0304,
                     shamt: 0b00001,
                     imm32: 0b010000000001,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b00100], 0x0101_0101);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // ADDI -1, r1, r3
         let pc = 0x1000_000C;
@@ -533,7 +588,7 @@ mod tests {
                 raw_instruction,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -551,10 +606,11 @@ mod tests {
                     rs2: 0x0000_0000,
                     shamt: 0b11111,
                     imm32: -1,
-                }
+                },
+                return_from_trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -576,7 +632,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::MemoryAccess)
+        );
 
         rv.cycle();
         assert_eq!(
@@ -595,14 +654,21 @@ mod tests {
                     rs2: 0x0000_0000,
                     shamt: 0b11111,
                     imm32: -1,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b00011], 0x0102_0303);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // SRL r10, r11, r12
         let pc = 0x1000_0010;
@@ -617,7 +683,7 @@ mod tests {
                 raw_instruction,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -635,10 +701,11 @@ mod tests {
                     rs2: 0x0000_0001,
                     shamt: 0b01011,
                     imm32: 0b000000001011,
-                }
+                },
+                return_from_trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -660,7 +727,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::MemoryAccess)
+        );
 
         rv.cycle();
         assert_eq!(
@@ -679,14 +749,21 @@ mod tests {
                     rs2: 0x0000_0001,
                     shamt: 0b01011,
                     imm32: 0b000000001011,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b01100], 0x4000_0000);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // SRA r10, r11, r12
         let pc = 0x1000_0014;
@@ -701,7 +778,7 @@ mod tests {
                 raw_instruction,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Decode));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
 
         rv.cycle();
         assert_eq!(
@@ -719,10 +796,11 @@ mod tests {
                     rs2: 0x0000_0001,
                     shamt: 0b01011,
                     imm32: 0b010000001011,
-                }
+                },
+                return_from_trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
 
         rv.cycle();
         assert_eq!(
@@ -744,7 +822,10 @@ mod tests {
                 }
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::MemoryAccess));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::MemoryAccess)
+        );
 
         rv.cycle();
         assert_eq!(
@@ -763,14 +844,21 @@ mod tests {
                     rs2: 0x0000_0001,
                     shamt: 0b01011,
                     imm32: 0b010000001011,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
 
         rv.cycle();
         assert_eq!(rv.reg_file[0b01100], 0xC000_0000);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
     }
 
     #[test]
@@ -806,13 +894,20 @@ mod tests {
                     rs1: 0x2000_0000,
                     rs2: 0xDEAD_BEEF,
                     imm32: 0b100,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
         rv.cycle();
         assert_eq!(rv.bus.read_word(0x2000_0004), Ok(0xDEAD_BEEF));
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // SHW r3, r1, imm6
         run_instruction!(rv);
@@ -854,13 +949,20 @@ mod tests {
                     rs1: 0x2000_0005,
                     rs2: 0xDEAD_BEEF,
                     imm32: -1,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
         rv.cycle();
         assert_eq!(rv.bus.read_word(0x2000_0004), Ok(0xDEAD_BEEF));
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
     }
 
     #[test]
@@ -896,13 +998,20 @@ mod tests {
                     rs1: 0x2000_0000,
                     rd: 0b00010,
                     imm32: 0b100,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
         rv.cycle();
         assert_eq!(rv.reg_file[2], 0xDEAD_BEEF);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // LHW r3, r1, imm6
         rv.cycle();
@@ -921,13 +1030,20 @@ mod tests {
                     rs1: 0x2000_0000,
                     rd: 0b00011,
                     imm32: 0b110,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
         rv.cycle();
         assert_eq!(rv.reg_file[3], 0xFFFF_BEEF);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // LB r4, r1, imm7
         rv.cycle();
@@ -946,13 +1062,20 @@ mod tests {
                     rs1: 0x2000_0000,
                     rd: 0b00100,
                     imm32: 0b111,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
         rv.cycle();
         assert_eq!(rv.reg_file[4], 0xFFFF_FFEF);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // LHWU r5, r1, imm6
         rv.cycle();
@@ -971,13 +1094,20 @@ mod tests {
                     rs1: 0x2000_0000,
                     rd: 0b00101,
                     imm32: 0b110,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
         rv.cycle();
         assert_eq!(rv.reg_file[5], 0x0000_BEEF);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // LBU r6, r1, imm7
         rv.cycle();
@@ -996,13 +1126,20 @@ mod tests {
                     rs1: 0x2000_0000,
                     rd: 0b00110,
                     imm32: 0b111,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
         rv.cycle();
         assert_eq!(rv.reg_file[6], 0x0000_00EF);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         // LW r11, r10, imm-1
         rv.cycle();
@@ -1021,13 +1158,20 @@ mod tests {
                     rs1: 0x2000_0005,
                     rd: 0b01011,
                     imm32: -1,
-                }
+                },
+                mcause: 0,
+                mepc: 0,
+                mtval: 0,
+                trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::WriteBack));
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
         rv.cycle();
         assert_eq!(rv.reg_file[11], 0xDEAD_BEEF);
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
     }
 
     #[test]
@@ -1051,13 +1195,14 @@ mod tests {
                 instruction: DecodedInstruction::Lui {
                     rd: 0b00001,
                     imm32: 0b10101010101010101010_000000000000,
-                }
+                },
+                return_from_trap: false,
             }
         );
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
         assert_eq!(rv.reg_file[1], 0xAAAA_A000);
 
         // ADDI r1, 0xAAAAA
@@ -1078,13 +1223,14 @@ mod tests {
                     rs2: 0b000,
                     shamt: 0b01010,
                     imm32: -1366,
-                }
+                },
+                return_from_trap: false,
             }
         );
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
         assert_eq!(rv.reg_file[1], 0xAAAA_9AAA);
     }
 
@@ -1134,14 +1280,15 @@ mod tests {
                 instruction: DecodedInstruction::Jal {
                     rd: 0b00000,
                     branch_address: 0x1000_0044,
-                }
+                },
+                return_from_trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         rv.cycle();
         assert_eq!(
@@ -1156,7 +1303,7 @@ mod tests {
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         for _ in 0..3 {
             run_instruction!(rv);
@@ -1182,14 +1329,15 @@ mod tests {
                 instruction: DecodedInstruction::Jal {
                     rd: 0b00001,
                     branch_address: 0x1000_000C,
-                }
+                },
+                return_from_trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         rv.cycle();
         assert_eq!(
@@ -1204,7 +1352,7 @@ mod tests {
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         for _ in 0..12 {
             run_instruction!(rv);
@@ -1230,14 +1378,15 @@ mod tests {
                 instruction: DecodedInstruction::Jal {
                     rd: 0b00000,
                     branch_address: 0x1000_0058,
-                }
+                },
+                return_from_trap: false,
             }
         );
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Execute));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
 
         rv.cycle();
         assert_eq!(
@@ -1252,6 +1401,69 @@ mod tests {
         rv.cycle();
         rv.cycle();
         rv.cycle();
-        assert_eq!(rv.state, CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
+    }
+
+    #[test]
+    fn test_memory_access_trap() {
+        let mut rv = RV32ISystem::new();
+        rv.reg_file[2] = 0x2000_0000;
+
+        rv.bus.rom.load(vec![
+            0b000000000001_00010_010_01110_0000011, // LW r14, r2, imm1
+        ]);
+
+        // LW r14, r2, imm1
+        rv.cycle();
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
+        rv.cycle();
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
+        rv.cycle();
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::MemoryAccess)
+        );
+        rv.cycle();
+        assert_eq!(
+            *rv.state.get(),
+            CPUState::Pipeline(PipelineState::WriteBack)
+        );
+        assert_eq!(
+            rv.stage_ma.get_memory_access_value_out(),
+            MemoryAccessValue {
+                pc: 0x1000_0000,
+                pc_plus_4: 0x1000_0004,
+                raw_instruction: 0b000000000001_00010_010_01110_0000011,
+                write_back_value: 0x0000_0000,
+                instruction: DecodedInstruction::Load {
+                    funct3: 0b010,
+                    rs1: 0x2000_0000,
+                    rd: 0b01110,
+                    imm32: 0b1,
+                },
+                mcause: MCAUSE_LOAD_ADDRESS_MISALIGNED,
+                mepc: 0x1000_0004,
+                mtval: 0b000000000001_00010_010_01110_0000011,
+                trap: true,
+            }
+        );
+        rv.cycle();
+        assert_eq!(*rv.state.get(), CPUState::Trap);
+        assert_eq!(*rv.trap.state.get(), TrapState::SetCSRJump);
+        rv.cycle();
+        assert_eq!(*rv.state.get(), CPUState::Trap);
+        assert_eq!(*rv.trap.state.get(), TrapState::Idle);
+        rv.cycle();
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
+        assert_eq!(
+            rv.stage_if.get_instruction_value_out(),
+            InstructionValue {
+                raw_instruction: 0b000000000001_00010_010_01110_0000011,
+                pc: 0x1000_0044,
+                pc_plus_4: 0x1000_0044,
+            }
+        );
+        rv.cycle();
+        assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
     }
 }
