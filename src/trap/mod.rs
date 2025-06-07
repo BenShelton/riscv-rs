@@ -39,6 +39,14 @@ pub enum TrapState {
     ReturnFromTrap,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PipelineTrapParams {
+    pub mepc: u32,
+    pub mcause: u32,
+    pub mtval: u32,
+    pub trap: bool,
+}
+
 pub struct TrapParams<'a> {
     pub csr: &'a mut CSRInterface,
     pub begin_trap: bool,

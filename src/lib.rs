@@ -78,16 +78,17 @@ impl RV32ISystem {
     pub fn compute(&mut self) {
         let mem_values = self.stage_ma.get_memory_access_value_out();
         self.mret = self.stage_de.get_decoded_instruction_out().return_from_trap;
-        self.trap_stall = self.state.get() == &CPUState::Trap || mem_values.trap || self.mret;
+        self.trap_stall =
+            self.state.get() == &CPUState::Trap || mem_values.trap_params.trap || self.mret;
 
         if self.trap_stall && matches!(self.state.get(), &CPUState::Pipeline(_)) {
             self.state.set(CPUState::Trap);
 
             // TODO: Some sort of better multiplexer selector abstraction?
-            if mem_values.trap {
-                self.trap.mcause.set(mem_values.mcause);
-                self.trap.mepc.set(mem_values.mepc);
-                self.trap.mtval.set(mem_values.mtval);
+            if mem_values.trap_params.trap {
+                self.trap.mcause.set(mem_values.trap_params.mcause);
+                self.trap.mepc.set(mem_values.trap_params.mepc);
+                self.trap.mtval.set(mem_values.trap_params.mtval);
             }
         } else if self.state.get() == &CPUState::Trap && *self.trap.return_to_pipeline_mode.get() {
             self.state.set(CPUState::Pipeline(PipelineState::Fetch));
@@ -138,7 +139,7 @@ impl RV32ISystem {
         self.csr.compute();
         self.trap.compute(TrapParams {
             csr: &mut self.csr,
-            begin_trap: self.stage_ma.get_memory_access_value_out().trap,
+            begin_trap: self.stage_ma.get_memory_access_value_out().trap_params.trap,
             begin_trap_return: self.stage_de.get_decoded_instruction_out().return_from_trap,
         });
 
@@ -203,7 +204,7 @@ mod tests {
             memory_access::MemoryAccessValue,
         },
         system_interface::MMIODevice,
-        trap::{MCAUSE_LOAD_ADDRESS_MISALIGNED, TrapState},
+        trap::{MCAUSE_LOAD_ADDRESS_MISALIGNED, PipelineTrapParams, TrapState},
     };
 
     macro_rules! run_instruction {
@@ -370,10 +371,7 @@ mod tests {
                     shamt: 0b00001,
                     imm32: 0b000000000001,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -465,10 +463,7 @@ mod tests {
                     shamt: 0b00001,
                     imm32: 0b000000000001,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -560,10 +555,7 @@ mod tests {
                     shamt: 0b00001,
                     imm32: 0b010000000001,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -655,10 +647,7 @@ mod tests {
                     shamt: 0b11111,
                     imm32: -1,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -750,10 +739,7 @@ mod tests {
                     shamt: 0b01011,
                     imm32: 0b000000001011,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -845,10 +831,7 @@ mod tests {
                     shamt: 0b01011,
                     imm32: 0b010000001011,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -895,10 +878,7 @@ mod tests {
                     rs2: 0xDEAD_BEEF,
                     imm32: 0b100,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -950,10 +930,7 @@ mod tests {
                     rs2: 0xDEAD_BEEF,
                     imm32: -1,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -999,10 +976,7 @@ mod tests {
                     rd: 0b00010,
                     imm32: 0b100,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -1031,10 +1005,7 @@ mod tests {
                     rd: 0b00011,
                     imm32: 0b110,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -1063,10 +1034,7 @@ mod tests {
                     rd: 0b00100,
                     imm32: 0b111,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -1095,10 +1063,7 @@ mod tests {
                     rd: 0b00101,
                     imm32: 0b110,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -1127,10 +1092,7 @@ mod tests {
                     rd: 0b00110,
                     imm32: 0b111,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -1159,10 +1121,7 @@ mod tests {
                     rd: 0b01011,
                     imm32: -1,
                 },
-                mcause: 0,
-                mepc: 0,
-                mtval: 0,
-                trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(
@@ -1411,6 +1370,23 @@ mod tests {
 
         rv.bus.rom.load(vec![
             0b000000000001_00010_010_01110_0000011, // LW r14, r2, imm1
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0b000000000000_00001_000_00000_1100111, // JALR x0, 0 (fake exception jump)
         ]);
 
         // LW r14, r2, imm1
@@ -1441,10 +1417,12 @@ mod tests {
                     rd: 0b01110,
                     imm32: 0b1,
                 },
-                mcause: MCAUSE_LOAD_ADDRESS_MISALIGNED,
-                mepc: 0x1000_0004,
-                mtval: 0b000000000001_00010_010_01110_0000011,
-                trap: true,
+                trap_params: PipelineTrapParams {
+                    mcause: MCAUSE_LOAD_ADDRESS_MISALIGNED,
+                    mepc: 0x1000_0004,
+                    mtval: 0b000000000001_00010_010_01110_0000011,
+                    trap: true,
+                },
             }
         );
         rv.cycle();
@@ -1455,15 +1433,17 @@ mod tests {
         assert_eq!(*rv.trap.state.get(), TrapState::Idle);
         rv.cycle();
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
+
+        // JAL r0, 0x44 (fake exception jump)
+        rv.cycle();
         assert_eq!(
             rv.stage_if.get_instruction_value_out(),
             InstructionValue {
-                raw_instruction: 0b000000000001_00010_010_01110_0000011,
+                raw_instruction: 0b000000000000_00001_000_00000_1100111,
                 pc: 0x1000_0044,
-                pc_plus_4: 0x1000_0044,
+                pc_plus_4: 0x1000_0048,
             }
         );
-        rv.cycle();
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
     }
 }

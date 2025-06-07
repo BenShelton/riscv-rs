@@ -1,7 +1,7 @@
 use crate::{
     csr::{CSR_OPERATION_RC, CSR_OPERATION_RS, CSR_OPERATION_RW, CSRInterface},
     system_interface::{MMIODevice, MMIOError, SystemInterface},
-    trap::MCAUSE_LOAD_ADDRESS_MISALIGNED,
+    trap::{MCAUSE_LOAD_ADDRESS_MISALIGNED, PipelineTrapParams},
     utils::{LatchValue, sign_extend_32},
 };
 
@@ -14,10 +14,7 @@ pub struct MemoryAccessValue {
     pub pc_plus_4: u32,
     pub instruction: DecodedInstruction,
     pub raw_instruction: u32,
-    pub mepc: u32,
-    pub mcause: u32,
-    pub mtval: u32,
-    pub trap: bool,
+    pub trap_params: PipelineTrapParams,
 }
 
 const WIDTH_BYTE: u8 = 0b000;
@@ -30,10 +27,7 @@ pub struct InstructionMemoryAccess {
     pc_plus_4: LatchValue<u32>,
     instruction: LatchValue<DecodedInstruction>,
     raw_instruction: LatchValue<u32>,
-    mepc: LatchValue<u32>,
-    mcause: LatchValue<u32>,
-    mtval: LatchValue<u32>,
-    trap: LatchValue<bool>,
+    trap_params: LatchValue<PipelineTrapParams>,
 }
 
 pub struct InstructionMemoryAccessParams<'a> {
@@ -51,10 +45,7 @@ impl InstructionMemoryAccess {
             pc_plus_4: LatchValue::new(0),
             instruction: LatchValue::new(DecodedInstruction::None),
             raw_instruction: LatchValue::new(0),
-            mepc: LatchValue::new(0),
-            mcause: LatchValue::new(0),
-            mtval: LatchValue::new(0),
-            trap: LatchValue::new(false),
+            trap_params: LatchValue::new(PipelineTrapParams::default()),
         }
     }
 
@@ -65,10 +56,7 @@ impl InstructionMemoryAccess {
             pc: *self.pc.get(),
             pc_plus_4: *self.pc_plus_4.get(),
             raw_instruction: *self.raw_instruction.get(),
-            mepc: *self.mepc.get(),
-            mcause: *self.mcause.get(),
-            mtval: *self.mtval.get(),
-            trap: *self.trap.get(),
+            trap_params: self.trap_params.get().clone(),
         }
     }
 }
@@ -76,7 +64,10 @@ impl InstructionMemoryAccess {
 impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAccess {
     fn compute(&mut self, params: InstructionMemoryAccessParams) {
         if params.should_stall {
-            self.trap.set(false);
+            self.trap_params.set(PipelineTrapParams {
+                trap: false,
+                ..Default::default()
+            });
             return;
         }
         let execution_value = params.execution_value_in;
@@ -117,10 +108,12 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                 match result {
                     Ok(value) => self.write_back_value.set(value),
                     Err(MMIOError::UnalignedRead(_)) => {
-                        self.mepc.set(execution_value.pc_plus_4);
-                        self.mcause.set(MCAUSE_LOAD_ADDRESS_MISALIGNED);
-                        self.mtval.set(execution_value.raw_instruction);
-                        self.trap.set(true);
+                        self.trap_params.set(PipelineTrapParams {
+                            mepc: execution_value.pc_plus_4,
+                            mcause: MCAUSE_LOAD_ADDRESS_MISALIGNED,
+                            mtval: execution_value.raw_instruction,
+                            trap: true,
+                        });
                     }
                     Err(e) => {
                         panic!("Error reading memory: {}", e);
@@ -145,10 +138,12 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
                 match result {
                     Ok(_) => {}
                     Err(MMIOError::UnalignedWrite(_, _)) => {
-                        self.mepc.set(execution_value.pc_plus_4);
-                        self.mcause.set(MCAUSE_LOAD_ADDRESS_MISALIGNED);
-                        self.mtval.set(execution_value.raw_instruction);
-                        self.trap.set(true);
+                        self.trap_params.set(PipelineTrapParams {
+                            mepc: execution_value.pc_plus_4,
+                            mcause: MCAUSE_LOAD_ADDRESS_MISALIGNED,
+                            mtval: execution_value.raw_instruction,
+                            trap: true,
+                        });
                     }
                     Err(e) => {
                         panic!("Error reading memory: {}", e);
@@ -210,9 +205,6 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
         self.pc.latch_next();
         self.pc_plus_4.latch_next();
         self.raw_instruction.latch_next();
-        self.mepc.latch_next();
-        self.mcause.latch_next();
-        self.mtval.latch_next();
-        self.trap.latch_next();
+        self.trap_params.latch_next();
     }
 }
