@@ -55,6 +55,7 @@ pub enum DecodedInstruction {
         rd: u8,
         imm32: u32,
     },
+    Fence {},
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -256,6 +257,9 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                     rd: ((instruction >> 7) & 0x1F) as u8,
                     imm32: (instruction >> 12) << 12,
                 });
+            }
+            0b0001111 => {
+                self.instruction.set(DecodedInstruction::Fence {});
             }
             _ => {
                 self.instruction.set(DecodedInstruction::None);

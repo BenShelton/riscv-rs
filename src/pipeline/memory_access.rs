@@ -195,6 +195,9 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
             DecodedInstruction::Auipc { imm32, .. } => {
                 self.write_back_value.set(execution_value.pc + imm32);
             }
+            DecodedInstruction::Fence { .. } => {
+                self.write_back_value.set(0);
+            }
             DecodedInstruction::None => {
                 self.write_back_value.set(0);
             }

@@ -47,6 +47,7 @@ impl<'a> PipelineStage<InstructionWriteBackParams<'a>> for InstructionWriteBack 
             DecodedInstruction::Auipc { rd, .. } => {
                 params.reg_file[rd as usize] = memory_access_value.write_back_value;
             }
+            DecodedInstruction::Fence { .. } => {}
             DecodedInstruction::None => {}
         }
     }
