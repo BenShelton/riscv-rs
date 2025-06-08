@@ -7,4 +7,5 @@ pub mod write_back;
 pub trait PipelineStage<T> {
     fn compute(&mut self, params: T);
     fn latch_next(&mut self);
+    fn reset(&mut self);
 }

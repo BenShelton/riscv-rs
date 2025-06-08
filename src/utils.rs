@@ -5,6 +5,7 @@ where
 {
     value: T,
     next: T,
+    default: T,
 }
 
 impl<T> LatchValue<T>
@@ -14,7 +15,8 @@ where
     pub fn new(value: T) -> Self {
         LatchValue {
             value: value.clone(),
-            next: value,
+            next: value.clone(),
+            default: value,
         }
     }
 
@@ -28,6 +30,11 @@ where
 
     pub fn latch_next(&mut self) {
         self.value = self.next.clone();
+    }
+
+    pub fn reset(&mut self) {
+        self.value = self.default.clone();
+        self.next = self.default.clone();
     }
 }
 

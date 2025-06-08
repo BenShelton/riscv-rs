@@ -48,6 +48,20 @@ binary-clean:
     ../../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .data build/{{filename}}.elf build/{{filename}}.data
     cat build/{{filename}}.code build/{{filename}}.data > ../../tests/binaries/{{filename}}.bin
 
+# Compiles the specified `.c` file in the `tests/binaries` directory, version 3
+[working-directory: 'system_code/v3']
+@binary-compile-3 filename:
+    mkdir -p build
+    rm -f build/binary*
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i_zicsr -I inc -c -ffreestanding -nostdlib src/boot.c -o build/boot.o
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i_zicsr -I inc -c -ffreestanding -nostdlib src/crt0.S -o build/crt0.o
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i_zicsr -I inc -c -ffreestanding -nostdlib src/isr.c -o build/isr.o
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i_zicsr -I inc -c -ffreestanding -nostdlib ../../tests/binaries/{{filename}}.c -o build/{{filename}}.o
+    ../../xpacks/.bin/riscv-none-elf-gcc -march=rv32i_zicsr -T link.ld -ffreestanding -nostdlib build/*.o -o build/{{filename}}.elf
+    ../../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .text build/{{filename}}.elf build/{{filename}}.code
+    ../../xpacks/.bin/riscv-none-elf-objcopy -O binary -j .data build/{{filename}}.elf build/{{filename}}.data
+    cat build/{{filename}}.code build/{{filename}}.data > ../../tests/binaries/{{filename}}.bin
+
 
 # Shows disassembly of the specified `.c` file in the `tests/binaries` directory, version 1
 [working-directory: 'system_code/v1']
@@ -59,5 +73,10 @@ binary-clean:
 @binary-dump-2 filename: (binary-compile-2 filename)
     ../../xpacks/.bin/riscv-none-elf-objdump -d build/{{filename}}.elf -M no-aliases,numeric
 
-alias bc := binary-compile-2
-alias bd := binary-dump-2
+# Shows disassembly of the specified `.c` file in the `tests/binaries` directory, version 2
+[working-directory: 'system_code/v3']
+@binary-dump-3 filename: (binary-compile-3 filename)
+    ../../xpacks/.bin/riscv-none-elf-objdump -d build/{{filename}}.elf -M no-aliases,numeric
+
+alias bc := binary-compile-3
+alias bd := binary-dump-3

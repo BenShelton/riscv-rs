@@ -1,6 +1,7 @@
 use super::{PipelineStage, fetch::InstructionValue};
 use crate::{
     RegisterFile,
+    trap::{MCAUSE_BREAKPOINT, MCAUSE_ENVIRONMENT_CALL_FROM_MMODE, PipelineTrapParams},
     utils::{LatchValue, bit, sign_extend_32, slice_32},
 };
 
@@ -58,13 +59,14 @@ pub enum DecodedInstruction {
     Fence {},
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DecodedValue {
     pub instruction: DecodedInstruction,
     pub raw_instruction: u32,
     pub pc: u32,
     pub pc_plus_4: u32,
     pub return_from_trap: bool,
+    pub trap_params: PipelineTrapParams,
 }
 
 pub struct InstructionDecode {
@@ -73,6 +75,7 @@ pub struct InstructionDecode {
     pc: LatchValue<u32>,
     pc_plus_4: LatchValue<u32>,
     return_from_trap: LatchValue<bool>,
+    trap_params: LatchValue<PipelineTrapParams>,
 }
 
 pub struct InstructionDecodeParams<'a> {
@@ -89,6 +92,7 @@ impl InstructionDecode {
             pc: LatchValue::new(0),
             pc_plus_4: LatchValue::new(0),
             return_from_trap: LatchValue::new(false),
+            trap_params: LatchValue::new(PipelineTrapParams::default()),
         }
     }
 
@@ -99,6 +103,7 @@ impl InstructionDecode {
             pc: *self.pc.get(),
             pc_plus_4: *self.pc_plus_4.get(),
             return_from_trap: *self.return_from_trap.get(),
+            trap_params: self.trap_params.get().clone(),
         }
     }
 }
@@ -107,6 +112,7 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
     fn compute(&mut self, params: InstructionDecodeParams<'a>) {
         if params.should_stall {
             self.return_from_trap.set(false);
+            self.trap_params.set(PipelineTrapParams::default());
             return;
         }
         let instruction = params.instruction_in.raw_instruction;
@@ -221,37 +227,59 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
                     },
                 });
             }
-            0b1110011 => {
-                let rd = ((instruction >> 7) & 0x1F) as u8;
-                let rs1_address = ((instruction >> 15) & 0x1F) as u8;
-                let funct3 = ((instruction >> 12) & 0x07) as u8;
-                let imm11_0 = instruction >> 20;
+            0b1110011 => match instruction >> 7 {
+                0 => {
+                    // ECALL
+                    self.trap_params.set(PipelineTrapParams {
+                        mepc: params.instruction_in.pc_plus_4,
+                        mcause: MCAUSE_ENVIRONMENT_CALL_FROM_MMODE,
+                        mtval: 0,
+                        trap: true,
+                    });
+                    self.instruction.set(DecodedInstruction::None);
+                }
+                0b1_00000_000_00000 => {
+                    // EBREAK
+                    self.trap_params.set(PipelineTrapParams {
+                        mepc: params.instruction_in.pc_plus_4,
+                        mcause: MCAUSE_BREAKPOINT,
+                        mtval: 0,
+                        trap: true,
+                    });
+                    self.instruction.set(DecodedInstruction::None);
+                }
+                _ => {
+                    let rd = ((instruction >> 7) & 0x1F) as u8;
+                    let rs1_address = ((instruction >> 15) & 0x1F) as u8;
+                    let funct3 = ((instruction >> 12) & 0x07) as u8;
+                    let imm11_0 = instruction >> 20;
 
-                self.return_from_trap
-                    .set(rd == 0 && rs1_address == 0 && imm11_0 == 0x302);
+                    self.return_from_trap
+                        .set(rd == 0 && rs1_address == 0 && imm11_0 == 0x302);
 
-                let source = match funct3 & 0b100 {
-                    0b100 => rs1_address as u32,
-                    _ => params.reg_file[rs1_address as usize],
-                };
-                let should_write = match funct3 & 0b11 {
-                    0b01 => true,
-                    _ => rs1_address != 0,
-                };
-                let should_read = match funct3 & 0b11 {
-                    0b01 => rd != 0,
-                    _ => true,
-                };
+                    let source = match funct3 & 0b100 {
+                        0b100 => rs1_address as u32,
+                        _ => params.reg_file[rs1_address as usize],
+                    };
+                    let should_write = match funct3 & 0b11 {
+                        0b01 => true,
+                        _ => rs1_address != 0,
+                    };
+                    let should_read = match funct3 & 0b11 {
+                        0b01 => rd != 0,
+                        _ => true,
+                    };
 
-                self.instruction.set(DecodedInstruction::System {
-                    funct3,
-                    csr_address: imm11_0,
-                    rd,
-                    source,
-                    should_write,
-                    should_read,
-                });
-            }
+                    self.instruction.set(DecodedInstruction::System {
+                        funct3,
+                        csr_address: imm11_0,
+                        rd,
+                        source,
+                        should_write,
+                        should_read,
+                    });
+                }
+            },
             0b0010111 => {
                 self.instruction.set(DecodedInstruction::Auipc {
                     rd: ((instruction >> 7) & 0x1F) as u8,
@@ -273,5 +301,15 @@ impl<'a> PipelineStage<InstructionDecodeParams<'a>> for InstructionDecode {
         self.pc.latch_next();
         self.pc_plus_4.latch_next();
         self.return_from_trap.latch_next();
+        self.trap_params.latch_next();
+    }
+
+    fn reset(&mut self) {
+        self.instruction.reset();
+        self.raw_instruction.reset();
+        self.pc.reset();
+        self.pc_plus_4.reset();
+        self.return_from_trap.reset();
+        self.trap_params.reset();
     }
 }

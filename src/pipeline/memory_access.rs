@@ -207,4 +207,13 @@ impl PipelineStage<InstructionMemoryAccessParams<'_>> for InstructionMemoryAcces
         self.raw_instruction.latch_next();
         self.trap_params.latch_next();
     }
+
+    fn reset(&mut self) {
+        self.write_back_value.reset();
+        self.instruction.reset();
+        self.pc.reset();
+        self.pc_plus_4.reset();
+        self.raw_instruction.reset();
+        self.trap_params.reset();
+    }
 }

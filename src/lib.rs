@@ -20,6 +20,8 @@ use system_interface::{RamDevice, RomDevice, SystemInterface};
 use trap::{TrapInterface, TrapParams};
 use utils::LatchValue;
 
+use crate::pipeline::{decode::DecodedValue, memory_access::MemoryAccessValue};
+
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum CPUState {
     Pipeline(PipelineState),
@@ -76,19 +78,30 @@ impl RV32ISystem {
     }
 
     pub fn compute(&mut self) {
+        let dec_values = self.stage_de.get_decoded_instruction_out();
         let mem_values = self.stage_ma.get_memory_access_value_out();
-        self.mret = self.stage_de.get_decoded_instruction_out().return_from_trap;
-        self.trap_stall =
-            self.state.get() == &CPUState::Trap || mem_values.trap_params.trap || self.mret;
+
+        self.mret = dec_values.return_from_trap;
+
+        // prefer traps later in the pipeline
+        let trap_params = match (dec_values, mem_values) {
+            (DecodedValue { .. }, MemoryAccessValue { trap_params, .. }) if trap_params.trap => {
+                Some(trap_params)
+            }
+            (DecodedValue { trap_params, .. }, MemoryAccessValue { .. }) if trap_params.trap => {
+                Some(trap_params)
+            }
+            _ => None,
+        };
+        self.trap_stall = self.state.get() == &CPUState::Trap || trap_params.is_some() || self.mret;
 
         if self.trap_stall && matches!(self.state.get(), &CPUState::Pipeline(_)) {
             self.state.set(CPUState::Trap);
 
-            // TODO: Some sort of better multiplexer selector abstraction?
-            if mem_values.trap_params.trap {
-                self.trap.mcause.set(mem_values.trap_params.mcause);
-                self.trap.mepc.set(mem_values.trap_params.mepc);
-                self.trap.mtval.set(mem_values.trap_params.mtval);
+            if let Some(trap_params) = trap_params {
+                self.trap.mcause.set(trap_params.mcause);
+                self.trap.mepc.set(trap_params.mepc);
+                self.trap.mtval.set(trap_params.mtval);
             }
         } else if self.state.get() == &CPUState::Trap && *self.trap.return_to_pipeline_mode.get() {
             self.state.set(CPUState::Pipeline(PipelineState::Fetch));
@@ -100,6 +113,14 @@ impl RV32ISystem {
 
         if matches!(self.state.get(), &CPUState::Pipeline(_)) && self.mret {
             self.state.set(CPUState::Trap);
+        }
+
+        if *self.trap.flush.get() {
+            self.stage_if.reset();
+            self.stage_de.reset();
+            self.stage_ex.reset();
+            self.stage_ma.reset();
+            self.stage_wb.reset();
         }
 
         self.stage_if.compute(InstructionFetchParams {
@@ -139,7 +160,8 @@ impl RV32ISystem {
         self.csr.compute();
         self.trap.compute(TrapParams {
             csr: &mut self.csr,
-            begin_trap: self.stage_ma.get_memory_access_value_out().trap_params.trap,
+            begin_trap: self.stage_de.get_decoded_instruction_out().trap_params.trap
+                || self.stage_ma.get_memory_access_value_out().trap_params.trap,
             begin_trap_return: self.stage_de.get_decoded_instruction_out().return_from_trap,
         });
 
@@ -324,6 +346,7 @@ mod tests {
                     imm32: 0b000000000001,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
@@ -416,6 +439,7 @@ mod tests {
                     imm32: 0b000000000001,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
@@ -508,6 +532,7 @@ mod tests {
                     imm32: 0b010000000001,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
@@ -600,6 +625,7 @@ mod tests {
                     imm32: -1,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
@@ -692,6 +718,7 @@ mod tests {
                     imm32: 0b000000001011,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
@@ -784,6 +811,7 @@ mod tests {
                     imm32: 0b010000001011,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
@@ -1156,6 +1184,7 @@ mod tests {
                     imm32: 0b10101010101010101010_000000000000,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         rv.cycle();
@@ -1184,6 +1213,7 @@ mod tests {
                     imm32: -1366,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         rv.cycle();
@@ -1241,6 +1271,7 @@ mod tests {
                     branch_address: 0x1000_0044,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
@@ -1290,6 +1321,7 @@ mod tests {
                     branch_address: 0x1000_000C,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
@@ -1339,6 +1371,7 @@ mod tests {
                     branch_address: 0x1000_0058,
                 },
                 return_from_trap: false,
+                trap_params: PipelineTrapParams::default(),
             }
         );
         assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));

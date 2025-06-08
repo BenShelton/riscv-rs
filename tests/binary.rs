@@ -323,3 +323,71 @@ fn test_binary_6() {
     assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
     assert_eq!(rv.current_line(), 0x1000_008C);
 }
+
+#[test]
+fn test_binary_7() {
+    let instructions = load_binary("binary7.bin");
+
+    let mut rv = RV32ISystem::new();
+    rv.bus.rom.load(instructions);
+
+    run_to_line!(rv, 0x1000_0098);
+
+    // 1000009c:    00000073    ecall
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Trap);
+    assert_eq!(*rv.trap.state.get(), TrapState::SetCSRJump);
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Trap);
+    assert_eq!(*rv.trap.state.get(), TrapState::Idle);
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
+    assert_eq!(rv.current_line(), 0x1000_0060);
+
+    // 10000060:    1100006f    jal	x0,10000170 <ECALL>
+    run_instruction!(rv);
+    run_instruction!(rv);
+    assert_eq!(rv.current_line(), 0x1000_0170);
+
+    // 10000170:    fe010113    addi x2,x2,-32
+    run_instruction!(rv);
+    assert_eq!(rv.current_line(), 0x1000_0174);
+    run_to_line!(rv, 0x1000_019C);
+
+    // 100001a0:    30200073    mret
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Trap);
+    assert_eq!(*rv.trap.state.get(), TrapState::ReturnFromTrap);
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Trap);
+    assert_eq!(*rv.trap.state.get(), TrapState::SetPc);
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Trap);
+    assert_eq!(*rv.trap.state.get(), TrapState::Idle);
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
+    assert_eq!(rv.current_line(), 0x1000_00A0);
+
+    // 100000a0:    00100073    ebreak
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Decode));
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Execute));
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Trap);
+    assert_eq!(*rv.trap.state.get(), TrapState::SetCSRJump);
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Trap);
+    assert_eq!(*rv.trap.state.get(), TrapState::Idle);
+    rv.cycle();
+    assert_eq!(*rv.state.get(), CPUState::Pipeline(PipelineState::Fetch));
+    assert_eq!(rv.current_line(), 0x1000_0040);
+}

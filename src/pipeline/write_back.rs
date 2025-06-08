@@ -53,4 +53,6 @@ impl<'a> PipelineStage<InstructionWriteBackParams<'a>> for InstructionWriteBack 
     }
 
     fn latch_next(&mut self) {}
+
+    fn reset(&mut self) {}
 }

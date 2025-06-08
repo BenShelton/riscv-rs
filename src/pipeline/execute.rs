@@ -189,4 +189,12 @@ impl PipelineStage<InstructionExecuteParams> for InstructionExecute {
         self.pc.latch_next();
         self.pc_plus_4.latch_next();
     }
+
+    fn reset(&mut self) {
+        self.write_back_value.reset();
+        self.instruction.reset();
+        self.raw_instruction.reset();
+        self.pc.reset();
+        self.pc_plus_4.reset();
+    }
 }

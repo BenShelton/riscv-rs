@@ -38,7 +38,7 @@ pub struct CSRInterface {
     /// Hart ID
     mhartid: u32,
     /// Various specific flags and settings, including global interrupt enable, and a lot of noop bits (for us)
-    mstatus: u32,
+    pub mstatus: u32,
     /// Encodes the base trap vector address + mode (table or single handler)
     pub mtvec: u32,
     /// Interrupt enable / disable

@@ -66,4 +66,10 @@ impl<'a> PipelineStage<InstructionFetchParams<'a>> for InstructionFetch {
         self.pc.latch_next();
         self.pc_plus_4.latch_next();
     }
+
+    fn reset(&mut self) {
+        self.raw_instruction.reset();
+        self.pc.reset();
+        self.pc_plus_4.reset();
+    }
 }

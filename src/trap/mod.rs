@@ -30,6 +30,11 @@ pub const MCAUSE_LOAD_PAGE_FAULT: u32 = 0x0000_000D;
 pub const MCAUSE_RESERVED_4: u32 = 0x0000_000E;
 pub const MCAUSE_STORE_AMO_PAGE_FAULT: u32 = 0x0000_000F;
 
+pub const MSTATUS_MIE_BIT: u32 = 3;
+pub const MSTATUS_MIE_MASK: u32 = 1 << MSTATUS_MIE_BIT;
+pub const MSTATUS_MPIE_BIT: u32 = 7;
+pub const MSTATUS_MPIE_MASK: u32 = 1 << MSTATUS_MPIE_BIT;
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TrapState {
     #[default]
@@ -62,6 +67,7 @@ pub struct TrapInterface {
     pub return_to_pipeline_mode: LatchValue<bool>,
     pub set_pc: LatchValue<bool>,
     pub pc_to_set: LatchValue<u32>,
+    pub flush: LatchValue<bool>,
 }
 
 impl TrapInterface {
@@ -74,14 +80,17 @@ impl TrapInterface {
             return_to_pipeline_mode: LatchValue::new(false),
             set_pc: LatchValue::new(false),
             pc_to_set: LatchValue::new(0),
+            flush: LatchValue::new(false),
         }
     }
 
     pub fn compute(&mut self, params: TrapParams) {
         if params.begin_trap {
             self.state.set(TrapState::SetCSRJump);
+            self.flush.set(true);
         } else if params.begin_trap_return {
             self.state.set(TrapState::ReturnFromTrap);
+            self.flush.set(false);
         } else {
             match self.state.get() {
                 TrapState::Idle => {
@@ -93,6 +102,15 @@ impl TrapInterface {
                     params.csr.mepc = *self.mepc.get();
                     params.csr.mcause = *mcause;
                     params.csr.mtval = *self.mtval.get();
+
+                    // move the current MIE to MPIE
+                    let mie = (params.csr.mstatus & MSTATUS_MIE_MASK) >> MSTATUS_MIE_BIT;
+                    // unset the MPIE bit
+                    params.csr.mstatus &= !MSTATUS_MPIE_MASK;
+                    // set MPIE to the current MIE
+                    params.csr.mstatus |= mie << MSTATUS_MPIE_BIT;
+                    // unset MIE
+                    params.csr.mstatus &= !MSTATUS_MIE_MASK;
 
                     let index = mcause & 0x7FFF_FFFF;
                     let is_interrupt = (mcause & 0x8000_0000) != 0;
@@ -111,8 +129,18 @@ impl TrapInterface {
                 TrapState::ReturnFromTrap => {
                     self.pc_to_set.set(params.csr.mepc);
                     self.state.set(TrapState::SetPc);
+
+                    // move the current MPIE to MIE
+                    let mpie = (params.csr.mstatus & MSTATUS_MPIE_MASK) >> MSTATUS_MPIE_BIT;
+                    // unset the MIE bit
+                    params.csr.mstatus &= !MSTATUS_MIE_MASK;
+                    // set MIE to the current MPIE
+                    params.csr.mstatus |= mpie << MSTATUS_MIE_BIT;
+                    // unset MPIE
+                    params.csr.mstatus &= !MSTATUS_MPIE_MASK;
                 }
             }
+            self.flush.set(false);
         }
     }
 
@@ -124,5 +152,6 @@ impl TrapInterface {
         self.return_to_pipeline_mode.latch_next();
         self.set_pc.latch_next();
         self.pc_to_set.latch_next();
+        self.flush.latch_next();
     }
 }
